@@ -44,7 +44,7 @@
   :root {
     --sidebar-width: 280px;
     --header-height: 46px;
-    --tabs-height: 34px;
+    --tabs-height: 40px;
     --breadcrumb-height: 0px;
     --console-default-height: 42vh;
     --panel-size: 42vh;
@@ -93,7 +93,9 @@
   .header-actions { gap: 2px; }
   .brand-title { font-size: 13px; }
   .brand-logo svg { width: 22px; height: 22px; }
-  .brand-text { display: none; }
+  .brand-text { display: flex; }
+  .brand-subtitle { display: none; }
+  .sidebar-resize-handle { display: none; }
 
   .tab {
     min-width: 110px;

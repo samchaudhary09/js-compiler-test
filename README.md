@@ -60,7 +60,7 @@ JS Playground is a static, fully-client-side coding playground that feels like a
 - Settings panel
 - Dark, Light, and High Contrast themes (with matching Monaco themes)
 - Status bar showing language, encoding, indentation, cursor position, save state
-- Problems panel listing Monaco diagnostics across all files
+- Problems panel listing current Monaco diagnostics for loaded project files, with file/line jump and range highlight
 - Toast notifications
 - Download active file
 - **Export project as ZIP** and **Import project from ZIP** (powered by JSZip)
@@ -198,9 +198,10 @@ go to definition, rename symbol, etc.
   and executed inside a Web Worker.
 - The worker has no access to the application's DOM, cookies, IndexedDB,
   localStorage, or the parent window.
-- Network access from user code (e.g. `fetch`) is governed by the browser's
-  normal same-origin/CORS rules. The application itself does not call any
-  analytics or telemetry endpoints.
+- User-code access to storage, host messaging, worker creation, and common
+  network APIs (`fetch`, XHR, WebSocket, and related constructors) is disabled
+  by the runner. The iframe fallback and DOM Preview also use restrictive CSPs.
+  The application does not call analytics or telemetry endpoints.
 - Monaco and JSZip are loaded from a pinned version on the jsDelivr CDN. If
   you need a fully offline deployment, you can vendor those files locally
   and adjust the URLs in `index.html` and `js/editor.js`.
@@ -255,8 +256,9 @@ learning-focused IDE layer:
   and a custom worker-to-IDE `prompt()` input dialog.
 - Quick Open, project-wide search (`Ctrl/Cmd+Shift+F`), Command Palette,
   Outline, breadcrumbs, snippets, duplicate/drag files, and tab actions.
-- Local practice exercises and bounded run history, persisted alongside the
-  existing IndexedDB/localStorage project data.
+- A categorized runnable learning library (Basics, Functions, Arrays, Objects,
+  Async, and Modern JavaScript), local practice exercises, and bounded run
+  history persisted alongside the existing IndexedDB/localStorage project data.
 - Dark, Light, and High Contrast themes plus editor font, ligature, line
   number, panel, Explorer sizing, and restore-tab preferences.
 

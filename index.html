@@ -114,7 +114,7 @@
       </section>
     </aside>
 
-    <div class="sidebar-overlay" id="sidebar-overlay" hidden></div>
+    <div class="sidebar-overlay" id="sidebar-overlay" aria-hidden="true"></div>
 
     <!-- Editor + Console area -->
     <section class="workspace panel-right" id="workspace" aria-label="Editor workspace">
@@ -219,7 +219,7 @@
   <!-- ============ QUICK OPEN ============ -->
   <div class="overlay" id="quick-open-overlay" hidden role="dialog" aria-modal="true" aria-label="Quick Open">
     <div class="quick-open" role="document">
-      <input type="text" id="quick-open-input" class="quick-open-input" placeholder="Search files by name (e.g. array)..." aria-label="Search files" autocomplete="off" />
+      <input type="text" id="quick-open-input" class="quick-open-input" placeholder="Search files by name (e.g. array)..." aria-label="Search files" role="combobox" aria-autocomplete="list" aria-controls="quick-open-results" aria-expanded="false" autocomplete="off" />
       <ul class="quick-open-results" id="quick-open-results" role="listbox"></ul>
     </div>
   </div>
@@ -229,7 +229,7 @@
     <div class="project-search-panel" role="document">
       <div class="search-heading"><strong>Search Project</strong><button type="button" class="icon-close" id="project-search-close" aria-label="Close search">×</button></div>
       <div class="project-search-controls">
-        <input type="search" id="project-search-input" class="quick-open-input" placeholder="Search in all files..." aria-label="Search project" autocomplete="off" />
+        <input type="search" id="project-search-input" class="quick-open-input" placeholder="Search in all files..." aria-label="Search project" role="combobox" aria-autocomplete="list" aria-controls="project-search-results" aria-expanded="false" autocomplete="off" />
         <label><input type="checkbox" id="search-case-sensitive" /> Match case</label>
         <label><input type="checkbox" id="search-whole-word" /> Whole word</label>
       </div>
@@ -240,7 +240,7 @@
   <!-- ============ COMMAND PALETTE ============ -->
   <div class="overlay" id="command-palette-overlay" hidden role="dialog" aria-modal="true" aria-label="Command Palette">
     <div class="command-palette" role="document">
-      <input type="text" id="command-palette-input" class="quick-open-input" placeholder="Type a command..." aria-label="Search commands" autocomplete="off" />
+      <input type="text" id="command-palette-input" class="quick-open-input" placeholder="Type a command..." aria-label="Search commands" role="combobox" aria-autocomplete="list" aria-controls="command-palette-results" aria-expanded="false" autocomplete="off" />
       <ul class="quick-open-results" id="command-palette-results" role="listbox"></ul>
     </div>
   </div>
@@ -405,6 +405,20 @@
       <div id="practice-content"></div>
       <div class="modal-actions"><button type="button" class="modal-btn" data-action="close">Close</button><button type="button" class="modal-btn primary" data-action="open">Open Exercise</button></div>
     </form>
+  </dialog>
+
+  <!-- ============ ISOLATED PREVIEW DIALOG ============ -->
+  <dialog class="modal preview-dialog" id="preview-dialog" aria-labelledby="preview-dialog-title">
+    <div class="preview-dialog-shell">
+      <header class="preview-dialog-header">
+        <div><span class="eyebrow">ISOLATED SANDBOX</span><h3 id="preview-dialog-title">JavaScript DOM Preview</h3></div>
+        <div class="preview-dialog-actions">
+          <button type="button" class="modal-btn" data-action="refresh">Refresh</button>
+          <button type="button" class="icon-close" data-action="close" aria-label="Close preview">×</button>
+        </div>
+      </header>
+      <iframe id="preview-dialog-frame" title="Expanded sandboxed JavaScript preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+    </div>
   </dialog>
 
   <!-- ============ ABOUT DIALOG ============ -->

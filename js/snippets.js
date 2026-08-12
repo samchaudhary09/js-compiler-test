@@ -448,7 +448,10 @@
   function register(monaco) {
     if (!monaco || !monaco.languages || !monaco.languages.registerCompletionItemProvider) return;
     monaco.languages.registerCompletionItemProvider('javascript', {
-      triggerCharacters: ['.', '"', "'", '/', 'c', 'l', 'e', 'w', 'i', 'f', 'a', 'r', 's', 't', 'o', 'n', 'm', 'p', 'd', 'v', 'g', 'u', 'h'],
+      // Word-based quick suggestions already invoke this provider while the
+      // user types. Restrict explicit triggers to punctuation to avoid doing
+      // a full snippet pass twice for every letter.
+      triggerCharacters: ['.', '"', "'", '/'],
       provideCompletionItems: function (model, position) {
         const word = model.getWordUntilPosition(position);
         const range = {

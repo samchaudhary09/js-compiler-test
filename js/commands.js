@@ -15,7 +15,7 @@
     /** List all commands (for command palette). */
     list() {
       return [
-        { label: 'Run JavaScript', category: 'Execution', run: () => this.run('palette') },
+        { label: 'Run File', category: 'Execution', run: () => this.run('palette') },
         { label: 'Stop Execution', category: 'Execution', run: () => this.stop() },
         { label: 'Clear Console', category: 'Console', run: () => this.clearConsole() },
         { label: 'Copy Console Output', category: 'Console', run: () => this.copyConsoleOutput() },
@@ -47,7 +47,8 @@
     run(source) {
       try {
         if (Execution.isRunning()) {
-          this.stop('user');
+          if (source === 'button') this.stop('user');
+          else UI.toast('JavaScript is already running. Use Stop before starting another run.', 'warn');
           return;
         }
         const file = State.files.get(State.activeFileId);
@@ -67,7 +68,7 @@
         // Make sure the user can see the output.
         const ws = document.getElementById('workspace');
         if (ws && ws.classList.contains('console-hidden')) {
-          ws.classList.remove('console-hidden');
+          this.setPanelPosition(State.settings.lastPanelPosition || 'bottom');
           if (Editor && Editor.editor) {
             try { Editor.editor.layout(); } catch (_) {}
           }
@@ -189,12 +190,27 @@
 
     async closeFile(fileId) {
       const file = State.files.get(fileId);
-      if (!file) return;
+      if (!file) return false;
       if (State.isDirty(fileId)) {
-        const action = await UI.unsavedChangesPrompt(file.name);
-        if (action === 'cancel') return;
+        // Turning the confirmation off must never become a data-loss switch:
+        // silently save the current file rather than silently discarding it.
+        const action = State.settings.confirmClose === false
+          ? 'save'
+          : await UI.unsavedChangesPrompt(file.name);
+        if (action === 'cancel') return false;
         if (action === 'save') {
-          State.markSaved(fileId);
+          const saved = this.saveFile
+            ? await this.saveFile(fileId)
+            : await this.persistProject().then(() => { State.markSaved(fileId); return true; }, () => false);
+          if (!saved) return false;
+        } else if (action === 'discard') {
+          file.content = file.savedContent == null ? '' : file.savedContent;
+          const model = State.models.get(fileId);
+          if (model && model.getValue && model.setValue && model.getValue() !== file.content) {
+            model.setValue(file.content);
+          }
+          // A previous unrelated project write may have persisted the dirty
+          // buffer, so persist the restored saved value as well.
           await this.persistProject();
         }
       }
@@ -219,49 +235,73 @@
       }
       UI.renderTabs();
       UI.renderFileTree();
-      this.persistState();
+      await this.persistState();
+      return true;
     },
 
     /* ---------------- Save / persistence ---------------- */
     save() {
-      // Pull current editor content into state.
+      const fileId = State.activeFileId;
+      const file = State.files.get(fileId);
+      if (!file) {
+        UI.toast('Open a file to save it.', 'warn');
+        return Promise.resolve(false);
+      }
+      // Pull only the active editor content into state. Save File must not
+      // clear modified indicators on unrelated tabs; Save All does that.
       if (Editor.editor) {
         const model = Editor.editor.getModel();
-        if (model) {
-          const file = State.files.get(State.activeFileId);
-          if (file) file.content = model.getValue();
-        }
+        if (model) file.content = model.getValue();
       }
-      State.markAllSaved();
+      const previousSavedContent = file.savedContent;
+      State.markSaved(fileId);
       UI.updateSaveStatus('saving');
       UI.renderTabs();
       return Promise.all([this.persistProject(), this.persistState()]).then(() => {
         UI.updateSaveStatus('saved');
         UI.renderTabs();
+        return true;
       }).catch((e) => {
+        file.savedContent = previousSavedContent;
         UI.updateSaveStatus('error', e.message);
+        UI.renderTabs();
+        return false;
       });
     },
 
-    scheduleAutoSave() {
+    scheduleAutoSave(fileId) {
+      if (!this._autoSaveFileIds) this._autoSaveFileIds = new Set();
+      const targetId = fileId || State.activeFileId;
+      if (targetId && State.files.has(targetId)) this._autoSaveFileIds.add(targetId);
       if (!this._autoSaveDebounced) {
         this._autoSaveDebounced = Utils.debounce(() => {
-          if (!State.settings.autoSave) return;
-          UI.updateSaveStatus('saving');
-          // Sync editor content.
-          if (Editor.editor) {
-            const model = Editor.editor.getModel();
-            if (model) {
-              const file = State.files.get(State.activeFileId);
-              if (file) file.content = model.getValue();
-            }
+          if (!State.settings.autoSave) {
+            this._autoSaveFileIds.clear();
+            return;
           }
-          State.markAllSaved();
+          const pendingIds = Array.from(this._autoSaveFileIds);
+          this._autoSaveFileIds.clear();
+          if (!pendingIds.length) return;
+          UI.updateSaveStatus('saving');
+          // Models keep every file's content synchronized with State. Mark only
+          // the files that scheduled this autosave so unrelated dirty tabs are
+          // never cleared accidentally.
+          const previousSavedContent = new Map();
+          pendingIds.forEach((id) => {
+            const file = State.files.get(id);
+            if (file) previousSavedContent.set(id, file.savedContent);
+            State.markSaved(id);
+          });
           Promise.all([this.persistProject(), this.persistState()]).then(() => {
             UI.updateSaveStatus('saved');
             UI.renderTabs();
           }).catch(() => {
+            previousSavedContent.forEach((content, id) => {
+              const file = State.files.get(id);
+              if (file) file.savedContent = content;
+            });
             UI.updateSaveStatus('error');
+            UI.renderTabs();
           });
         }, SAVE_DEBOUNCE_MS);
       }
@@ -312,6 +352,11 @@
       } else {
         State.resetToDefaults();
       }
+      // One-time, additive migration from the original flat examples folder
+      // to the categorized learning library. Existing files are never changed.
+      if (State.ensureLearningLibrary && State.ensureLearningLibrary()) {
+        await this.persistProject();
+      }
     },
 
     /* ---------------- Editor commands ---------------- */
@@ -330,8 +375,17 @@
         visible = main.classList.contains('sidebar-hidden');
       }
       main.classList.toggle('sidebar-hidden', !visible);
-      State.settings.sidebarVisible = visible;
-      this.persistSettings();
+      const mobileToggle = document.getElementById('btn-mobile-menu');
+      if (mobileToggle) {
+        mobileToggle.setAttribute('aria-expanded', String(visible));
+        mobileToggle.setAttribute('aria-label', visible ? 'Close Explorer' : 'Open Explorer');
+        mobileToggle.title = visible ? 'Close Explorer' : 'Open Explorer';
+      }
+      // The mobile drawer is transient; retain the desktop sidebar preference.
+      if (window.innerWidth > 768) {
+        State.settings.sidebarVisible = visible;
+        this.persistSettings();
+      }
       // Re-layout Monaco after the CSS transition.
       setTimeout(() => {
         if (Editor.editor) {
@@ -456,6 +510,10 @@
       input.addEventListener('change', async () => {
         const file = input.files && input.files[0];
         if (!file) return;
+        if (file.size > 10 * 1024 * 1024) {
+          UI.toast('Import failed: ZIP files are limited to 10 MB.', 'error');
+          return;
+        }
         if (typeof JSZip === 'undefined') {
           UI.toast('ZIP library not available', 'error');
           return;
@@ -474,15 +532,23 @@
             // duplicates, and oversized imports before adding anything.
             const path = String(rawPath).replace(/\\/g, '/');
             const parts = path.split('/').filter(Boolean);
-            if (!parts.length || path.startsWith('/') || parts.some((part) => part === '..' || part === '.' || /[\u0000-\u001f]/.test(part))) continue;
+            const invalidPath = !parts.length || path.startsWith('/') || path.startsWith('~') || parts.length > 20 || parts.some((part) =>
+              part === '..' || part === '.' || part.length > 120 || /[:*?"<>|\u0000-\u001f]/.test(part)
+            );
+            if (invalidPath) throw new Error('The ZIP contains an unsafe or invalid path.');
             const safePath = parts.join('/');
+            const canonicalPath = safePath.toLowerCase();
             const base = parts[parts.length - 1];
             if (base.startsWith('.') || !/\.(js|mjs|cjs|jsx)$/i.test(base)) continue;
-            if (seenPaths.has(safePath)) continue;
+            if (seenPaths.has(canonicalPath)) throw new Error('The ZIP contains duplicate file paths.');
+            const declaredSize = entry._data && Number(entry._data.uncompressedSize);
+            if (Number.isFinite(declaredSize) && declaredSize >= 0 && totalBytes + declaredSize > 2 * 1024 * 1024) {
+              throw new Error('The project is larger than the 2 MB browser import limit.');
+            }
             const content = await entry.async('string');
-            totalBytes += content.length;
+            totalBytes += new Blob([content]).size;
             if (totalBytes > 2 * 1024 * 1024) throw new Error('The project is larger than the 2 MB browser import limit.');
-            seenPaths.add(safePath);
+            seenPaths.add(canonicalPath);
             files.push({ path: safePath, content: content });
           }
           if (files.length === 0) {

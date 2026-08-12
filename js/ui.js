@@ -117,9 +117,13 @@
           // Close top-most overlay first.
           if (!this.dom.commandPaletteOverlay.hidden) {
             this.dom.commandPaletteOverlay.hidden = true;
+            this.dom.commandPaletteInput.setAttribute('aria-expanded', 'false');
+            this.dom.commandPaletteInput.removeAttribute('aria-activedescendant');
             if (Editor.editor) Editor.focus();
           } else if (!this.dom.quickOpenOverlay.hidden) {
             this.dom.quickOpenOverlay.hidden = true;
+            this.dom.quickOpenInput.setAttribute('aria-expanded', 'false');
+            this.dom.quickOpenInput.removeAttribute('aria-activedescendant');
             if (Editor.editor) Editor.focus();
           } else if (!this.dom.settingsOverlay.hidden) {
             this.closeSettings();
@@ -141,8 +145,18 @@
       this._setupConsoleResize();
 
       // Settings tabs.
-      this.dom.settingsTabs && this.dom.settingsTabs.forEach((t) => {
+      this.dom.settingsTabs && this.dom.settingsTabs.forEach((t, index) => {
         t.addEventListener('click', () => this.openSettingsTab(t.dataset.tab));
+        t.addEventListener('keydown', (event) => {
+          if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+          event.preventDefault();
+          const tabs = Array.from(this.dom.settingsTabs);
+          const next = event.key === 'ArrowRight'
+            ? (index + 1) % tabs.length
+            : (index - 1 + tabs.length) % tabs.length;
+          tabs[next].focus();
+          tabs[next].click();
+        });
       });
 
       // Panel-position select.
@@ -288,8 +302,7 @@
       [this.dom.quickOpenOverlay, this.dom.commandPaletteOverlay].forEach((o) => {
         o.addEventListener('mousedown', (e) => {
           if (e.target === o) {
-            o.hidden = true;
-            if (Editor.editor) Editor.focus();
+            this.closeAllOverlays();
           }
         });
       });
@@ -344,7 +357,7 @@
       const row = document.createElement('div');
       row.className = 'tree-row' + (node.id === State.activeFileId ? ' selected' : '');
       row.style.paddingLeft = (8 + depth * 12) + 'px';
-      row.tabIndex = node.id === State.activeFileId ? 0 : -1;
+      row.tabIndex = (node.id === State.activeFileId || (!State.activeFileId && node.id === State.project.id)) ? 0 : -1;
       row.dataset.id = node.id;
 
       // Chevron (folders only).
@@ -405,9 +418,20 @@
         this.showContextMenuFor(node.id, e.clientX, e.clientY);
       });
 
-      // Keyboard activation for tree.
+      // Keyboard activation and roving focus for the tree.
       row.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown' || e.key === 'Home' || e.key === 'End') {
+          const rows = Array.from(this.dom.fileTree.querySelectorAll('.tree-row')).filter((item) => item.getClientRects().length > 0);
+          const current = Math.max(0, rows.indexOf(row));
+          let next = current;
+          if (e.key === 'ArrowUp') next = Math.max(0, current - 1);
+          else if (e.key === 'ArrowDown') next = Math.min(rows.length - 1, current + 1);
+          else if (e.key === 'Home') next = 0;
+          else next = rows.length - 1;
+          e.preventDefault();
+          rows.forEach((item, index) => { item.tabIndex = index === next ? 0 : -1; });
+          if (rows[next]) rows[next].focus();
+        } else if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
           if (node.type === 'folder') {
             Filesystem.toggleExpand(node.id);
@@ -421,6 +445,10 @@
         } else if (e.key === 'Delete') {
           e.preventDefault();
           JSP.Commands.deleteItem(node.id);
+        } else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+          e.preventDefault();
+          const rect = row.getBoundingClientRect();
+          this.showContextMenuFor(node.id, rect.left + 18, rect.bottom - 2);
         } else if (e.key === 'ArrowRight') {
           if (node.type === 'folder' && !node.expanded) {
             Filesystem.toggleExpand(node.id, true);
@@ -471,6 +499,7 @@
           tab.className = 'tab' + (id === State.activeFileId ? ' active' : '');
           tab.setAttribute('role', 'tab');
           tab.setAttribute('aria-selected', id === State.activeFileId ? 'true' : 'false');
+          tab.tabIndex = id === State.activeFileId ? 0 : -1;
           tab.dataset.id = id;
 
           const icon = document.createElement('span');
@@ -495,6 +524,27 @@
           tab.appendChild(close);
 
           tab.addEventListener('click', () => Editor.openFile(id));
+          tab.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+              e.preventDefault();
+              const ids = State.openTabs.filter((fileId) => State.files.has(fileId));
+              const current = ids.indexOf(id);
+              const next = e.key === 'ArrowRight'
+                ? (current + 1) % ids.length
+                : (current - 1 + ids.length) % ids.length;
+              if (ids[next]) Editor.openFile(ids[next]);
+            } else if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              Editor.openFile(id);
+            } else if (e.key === 'Delete') {
+              e.preventDefault();
+              JSP.Commands.closeFile(id);
+            } else if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+              e.preventDefault();
+              const rect = tab.getBoundingClientRect();
+              this.showContextMenuFor(id, rect.left + 12, rect.bottom - 2);
+            }
+          });
           tab.addEventListener('mousedown', (e) => {
             if (e.button === 1) {
               e.preventDefault();
@@ -657,11 +707,14 @@
 
     _setupConsoleResize() {
       const onUp = () => {
+        const resized = (this.dom.resizeH && this.dom.resizeH.classList.contains('dragging')) ||
+          (this.dom.resizeV && this.dom.resizeV.classList.contains('dragging'));
         document.removeEventListener('mousemove', onMoveH);
         document.removeEventListener('mousemove', onMoveV);
         document.removeEventListener('mouseup', onUp);
         this.dom.resizeH && this.dom.resizeH.classList.remove('dragging');
         this.dom.resizeV && this.dom.resizeV.classList.remove('dragging');
+        if (resized && JSP.Commands) JSP.Commands.persistSettings();
       };
       let startY = 0, startH = 0;
       const onMoveH = (e) => {
@@ -735,7 +788,8 @@
           else if (e.key === 'ArrowLeft' && !vertical) size += delta;
           else return;
           e.preventDefault();
-          size = Math.max(vertical ? 120 : 240, size);
+          const maximum = vertical ? window.innerHeight * 0.6 : window.innerWidth * 0.7;
+          size = Math.max(vertical ? 120 : 240, Math.min(maximum, size));
           if (vertical) State.settings.panelHeight = size;
           else State.settings.panelWidth = size;
           document.documentElement.style.setProperty('--panel-size', size + 'px');
@@ -813,8 +867,10 @@
       if (node.type === 'file') {
         items.push({ label: 'Open', action: 'open' });
       }
-      items.push({ label: 'Rename', action: 'rename', shortcut: 'F2' });
-      items.push({ label: 'Delete', action: 'delete', shortcut: 'Del', danger: true });
+      if (node.id !== State.project.id) {
+        items.push({ label: 'Rename', action: 'rename', shortcut: 'F2' });
+        items.push({ label: 'Delete', action: 'delete', shortcut: 'Del', danger: true });
+      }
       if (node.type === 'file') {
         items.push({ separator: true });
         items.push({ label: 'Download', action: 'download' });
@@ -843,9 +899,6 @@
         li.addEventListener('click', () => {
           this.hideContextMenu();
           this._handleContextAction(it.action, nodeId);
-        });
-        li.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') li.click();
         });
         menu.appendChild(li);
       });
@@ -902,7 +955,7 @@
      * ============================================================ */
     _startRenameInline(nodeId, row) {
       const node = State.findNode(nodeId);
-      if (!node) return;
+      if (!node || node.id === State.project.id) return;
       row.classList.add('renaming');
       const label = row.querySelector('.tree-label');
       const oldName = node.name;
@@ -996,9 +1049,6 @@
           this.closeMenu();
           it.action && it.action();
         });
-        row.addEventListener('keydown', (e) => {
-          if (e.key === 'Enter') row.click();
-        });
         menu.appendChild(row);
       });
       menu.hidden = false;
@@ -1007,6 +1057,8 @@
       menu.style.top = rect.bottom + 'px';
       anchor.setAttribute('aria-expanded', 'true');
       this._activeMenu = name;
+      const firstItem = menu.querySelector('.dropdown-item');
+      if (firstItem) firstItem.focus();
     },
 
     closeMenu() {
@@ -1039,7 +1091,7 @@
             { label: 'New Folder', action: () => C.newFolder() },
             '-',
             { label: 'Save', shortcut: this._sc('save'), action: () => C.save() },
-            { label: 'Save All', action: () => C.save() },
+            { label: 'Save All', shortcut: this._sc('saveAll'), action: () => C.saveAll ? C.saveAll() : C.save() },
             '-',
             { label: 'Download File', action: () => C.downloadActiveFile() },
             { label: 'Export Project (ZIP)', action: () => C.exportProject() },
@@ -1098,7 +1150,7 @@
           ];
         case 'run':
           return [
-            { label: 'Run JavaScript', shortcut: this._sc('run'), action: () => C.run('menu') },
+            { label: 'Run File', shortcut: this._sc('run'), action: () => C.run('menu') },
             { label: 'Stop Execution', action: () => C.stop() },
             '-',
             { label: 'Clear Console', shortcut: this._sc('clearConsole'), action: () => C.clearConsole() }
@@ -1139,6 +1191,8 @@
         results.forEach((f, i) => {
           const li = document.createElement('li');
           li.setAttribute('role', 'option');
+          li.id = 'quick-open-option-' + i;
+          li.setAttribute('aria-selected', i === selected ? 'true' : 'false');
           li.dataset.id = f.id;
           if (i === selected) li.classList.add('selected');
           const icon = document.createElement('span');
@@ -1158,10 +1212,16 @@
           });
           list.appendChild(li);
         });
+        updateSelection();
       };
       const updateSelection = () => {
-        Array.from(list.children).forEach((c, i) => c.classList.toggle('selected', i === selected));
-        const sel = list.children[selected];
+        const options = Array.from(list.querySelectorAll('[role="option"]'));
+        options.forEach((item, i) => {
+          item.classList.toggle('selected', i === selected);
+          item.setAttribute('aria-selected', i === selected ? 'true' : 'false');
+        });
+        const sel = options[selected];
+        input.setAttribute('aria-activedescendant', sel ? sel.id : '');
         if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
       };
       const selectEntry = (i) => {
@@ -1195,6 +1255,7 @@
     openQuickOpen() {
       this.closeAllOverlays();
       this.dom.quickOpenOverlay.hidden = false;
+      this.dom.quickOpenInput.setAttribute('aria-expanded', 'true');
       this.dom.quickOpenInput.value = '';
       this._quickOpenRender && this._quickOpenRender();
       setTimeout(() => this.dom.quickOpenInput.focus(), 0);
@@ -1229,6 +1290,8 @@
         commands.forEach((c, i) => {
           const li = document.createElement('li');
           li.setAttribute('role', 'option');
+          li.id = 'command-palette-option-' + i;
+          li.setAttribute('aria-selected', i === selected ? 'true' : 'false');
           if (i === selected) li.classList.add('selected');
           const name = document.createElement('span');
           name.textContent = c.label;
@@ -1243,10 +1306,16 @@
           li.addEventListener('mouseenter', () => { selected = i; updateSelection(); });
           list.appendChild(li);
         });
+        updateSelection();
       };
       const updateSelection = () => {
-        Array.from(list.children).forEach((c, i) => c.classList.toggle('selected', i === selected));
-        const sel = list.children[selected];
+        const options = Array.from(list.querySelectorAll('[role="option"]'));
+        options.forEach((item, i) => {
+          item.classList.toggle('selected', i === selected);
+          item.setAttribute('aria-selected', i === selected ? 'true' : 'false');
+        });
+        const sel = options[selected];
+        input.setAttribute('aria-activedescendant', sel ? sel.id : '');
         if (sel && sel.scrollIntoView) sel.scrollIntoView({ block: 'nearest' });
       };
       const selectEntry = (i) => {
@@ -1256,8 +1325,13 @@
         try { c.run(); } catch (e) { this.toast(e.message, 'error'); }
       };
 
-      input.addEventListener('input', () => { selected = 0; render(); });
+      input.addEventListener('input', () => {
+        if (this._genericPickerActive) return;
+        selected = 0;
+        render();
+      });
       input.addEventListener('keydown', (e) => {
+        if (this._genericPickerActive) return;
         if (e.key === 'ArrowDown') {
           e.preventDefault();
           selected = Math.min((commands.length || 1) - 1, selected + 1);
@@ -1280,6 +1354,7 @@
     openCommandPalette() {
       this.closeAllOverlays();
       this.dom.commandPaletteOverlay.hidden = false;
+      this.dom.commandPaletteInput.setAttribute('aria-expanded', 'true');
       this.dom.commandPaletteInput.value = '';
       this._commandPaletteRender && this._commandPaletteRender();
       setTimeout(() => this.dom.commandPaletteInput.focus(), 0);
@@ -1328,10 +1403,12 @@
      */
     _openGenericPicker(title, items) {
       this.closeAllOverlays();
+      this._genericPickerActive = true;
       const overlay = this.dom.commandPaletteOverlay;
       const input = this.dom.commandPaletteInput;
       const list = this.dom.commandPaletteResults;
       overlay.hidden = false;
+      input.setAttribute('aria-expanded', 'true');
       input.value = '';
       input.placeholder = title || 'Search...';
       let selected = 0;
@@ -1353,6 +1430,9 @@
         }
         filtered.forEach((it, i) => {
           const li = document.createElement('li');
+          li.setAttribute('role', 'option');
+          li.id = 'generic-picker-option-' + i;
+          li.setAttribute('aria-selected', i === selected ? 'true' : 'false');
           if (i === selected) li.classList.add('selected');
           const lbl = document.createElement('span');
           lbl.textContent = it.label;
@@ -1367,9 +1447,15 @@
           li.addEventListener('mouseenter', () => { selected = i; updateSelection(); });
           list.appendChild(li);
         });
+        updateSelection();
       };
       const updateSelection = () => {
-        Array.from(list.children).forEach((c, i) => c.classList.toggle('selected', i === selected));
+        const options = Array.from(list.querySelectorAll('[role="option"]'));
+        options.forEach((item, i) => {
+          item.classList.toggle('selected', i === selected);
+          item.setAttribute('aria-selected', i === selected ? 'true' : 'false');
+        });
+        input.setAttribute('aria-activedescendant', options[selected] ? options[selected].id : '');
       };
       const select = (i) => {
         const it = filtered[i];
@@ -1379,11 +1465,16 @@
       };
       const close = () => {
         overlay.hidden = true;
+        this._genericPickerActive = false;
+        if (this._closeGenericPicker === close) this._closeGenericPicker = null;
+        input.setAttribute('aria-expanded', 'false');
+        input.removeAttribute('aria-activedescendant');
         input.placeholder = 'Type a command...';
         input.removeEventListener('input', onInput);
         input.removeEventListener('keydown', onKey);
         if (Editor.editor) Editor.focus();
       };
+      this._closeGenericPicker = close;
       const onInput = () => { selected = 0; render(); };
       const onKey = (e) => {
         if (e.key === 'ArrowDown') { e.preventDefault(); selected = Math.min(filtered.length - 1, selected + 1); updateSelection(); }
@@ -1398,8 +1489,13 @@
     },
 
     closeAllOverlays() {
+      if (this._closeGenericPicker) this._closeGenericPicker();
       this.dom.quickOpenOverlay.hidden = true;
       this.dom.commandPaletteOverlay.hidden = true;
+      this.dom.quickOpenInput.setAttribute('aria-expanded', 'false');
+      this.dom.quickOpenInput.removeAttribute('aria-activedescendant');
+      this.dom.commandPaletteInput.setAttribute('aria-expanded', 'false');
+      this.dom.commandPaletteInput.removeAttribute('aria-activedescendant');
       // Settings is closed by its own close button / outside-click; not via Escape
       // when other overlays are open.
       if (Editor.editor) Editor.focus();
@@ -1432,6 +1528,7 @@
         const active = t.dataset.tab === name;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', active ? 'true' : 'false');
+        t.tabIndex = active ? 0 : -1;
       });
       this.dom.settingsBodies.forEach((b) => {
         b.hidden = b.dataset.settingsTab !== name;
@@ -1652,17 +1749,23 @@
         msg.textContent = '"' + fileName + '" has unsaved changes.\n\nSave before closing?';
         const actions = dlg.querySelectorAll('button[data-action]');
         const close = () => { try { dlg.close(); } catch (_) { dlg.hidden = true; } };
-        const handlers = [];
+        const handlers = new Map();
+        let settled = false;
         const done = (val) => {
-          actions.forEach((b) => b.removeEventListener('click', handlers[0]));
+          if (settled) return;
+          settled = true;
+          actions.forEach((button) => button.removeEventListener('click', handlers.get(button)));
+          dlg.removeEventListener('cancel', onDialogCancel);
           close();
           resolve(val);
         };
-        actions.forEach((b) => {
-          const h = () => done(b.dataset.action);
-          handlers.push(h);
-          b.addEventListener('click', h);
+        const onDialogCancel = (event) => { event.preventDefault(); done('cancel'); };
+        actions.forEach((button) => {
+          const handler = () => done(button.dataset.action);
+          handlers.set(button, handler);
+          button.addEventListener('click', handler);
         });
+        dlg.addEventListener('cancel', onDialogCancel);
         if (typeof dlg.showModal === 'function') {
           if (!dlg.open) dlg.showModal();
         } else {
@@ -1703,6 +1806,7 @@
           resolve(true);
         };
         const onCancel = () => { cleanup(); close(); resolve(false); };
+        const onDialogCancel = (event) => { event.preventDefault(); onCancel(); };
         const onKey = (e) => {
           if (e.key === 'Enter') { e.preventDefault(); onConfirm(); }
           else if (e.key === 'Escape') { e.preventDefault(); onCancel(); }
@@ -1711,10 +1815,12 @@
           confirmBtn.removeEventListener('click', onConfirm);
           cancelBtn.removeEventListener('click', onCancel);
           input.removeEventListener('keydown', onKey);
+          dlg.removeEventListener('cancel', onDialogCancel);
         }
         confirmBtn.addEventListener('click', onConfirm);
         cancelBtn.addEventListener('click', onCancel);
         input.addEventListener('keydown', onKey);
+        dlg.addEventListener('cancel', onDialogCancel);
         if (typeof dlg.showModal === 'function') {
           if (!dlg.open) dlg.showModal();
         } else {

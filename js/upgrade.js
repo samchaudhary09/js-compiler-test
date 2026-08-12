@@ -30,6 +30,9 @@
     lineNumbers: State.settings.lineNumbers !== false,
     confirmClose: State.settings.confirmClose !== false,
     restoreTabs: State.settings.restoreTabs !== false,
+    lastPanelPosition: ['bottom', 'right'].includes(State.settings.lastPanelPosition)
+      ? State.settings.lastPanelPosition
+      : (State.settings.panelPosition === 'right' ? 'right' : 'bottom'),
     explorerWidth: clamp(Number(State.settings.explorerWidth) || DEFAULT_LAYOUT.explorerWidth, 200, 400),
     panelWidth: clamp(Number(State.settings.panelWidth) || DEFAULT_LAYOUT.panelWidth, 240, 520),
     panelHeight: clamp(Number(State.settings.panelHeight) || DEFAULT_LAYOUT.panelHeight, 120, 900)
@@ -41,6 +44,17 @@
 
   function safeText(value) {
     return value == null ? '' : String(value);
+  }
+
+  function editorFontStack(preference) {
+    const allowed = {
+      'JetBrains Mono': '"JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, monospace',
+      'Fira Code': '"Fira Code", "JetBrains Mono", "SFMono-Regular", Consolas, monospace',
+      'SFMono-Regular': '"SFMono-Regular", "JetBrains Mono", Consolas, monospace',
+      'Consolas': 'Consolas, "JetBrains Mono", monospace',
+      'monospace': 'monospace'
+    };
+    return allowed[preference] || allowed['JetBrains Mono'];
   }
 
   function nowLabel(timestamp) {
@@ -112,6 +126,8 @@
       outputList: document.getElementById('output-list'),
       previewBody: document.getElementById('preview-body'),
       previewFrame: document.getElementById('preview-frame'),
+      previewDialog: document.getElementById('preview-dialog'),
+      previewDialogFrame: document.getElementById('preview-dialog-frame'),
       projectSearchOverlay: document.getElementById('project-search-overlay'),
       projectSearchInput: document.getElementById('project-search-input'),
       projectSearchResults: document.getElementById('project-search-results'),
@@ -155,12 +171,22 @@
     const d = UI.dom;
 
     if (d.mobileMenu) {
-      d.mobileMenu.hidden = window.innerWidth > 768;
-      d.mobileMenu.addEventListener('click', () => Commands.toggleSidebar(true));
+      let wasMobile = window.innerWidth <= 768;
+      d.mobileMenu.hidden = !wasMobile;
+      d.mobileMenu.setAttribute('aria-expanded', 'false');
+      d.mobileMenu.addEventListener('click', () => {
+        const drawerOpen = !document.querySelector('.app-main').classList.contains('sidebar-hidden');
+        Commands.toggleSidebar(!drawerOpen);
+      });
       window.addEventListener('resize', () => {
-        d.mobileMenu.hidden = window.innerWidth > 768;
-        document.body.classList.toggle('no-minimap', window.innerWidth <= 768);
-        if (Editor.editor && Editor.editor.updateOptions) Editor.editor.updateOptions({ minimap: { enabled: State.settings.minimap && window.innerWidth > 768 } });
+        const isMobile = window.innerWidth <= 768;
+        d.mobileMenu.hidden = !isMobile;
+        document.body.classList.toggle('no-minimap', isMobile);
+        if (isMobile !== wasMobile) {
+          Commands.toggleSidebar(isMobile ? false : State.settings.sidebarVisible);
+          wasMobile = isMobile;
+        }
+        if (Editor.editor && Editor.editor.updateOptions) Editor.editor.updateOptions({ minimap: { enabled: State.settings.minimap && !isMobile } });
       });
     }
     if (d.emptyNewFile) d.emptyNewFile.addEventListener('click', () => Commands.newFile());
@@ -196,9 +222,31 @@
         if (event.target === d.projectSearchOverlay) UI.closeProjectSearch();
       });
     }
-    [d.projectSearchInput, d.searchCaseSensitive, d.searchWholeWord].forEach((el) => {
-      if (el) el.addEventListener('input', () => UI.renderProjectSearch());
+    const scheduleProjectSearch = Utils.debounce(() => UI.renderProjectSearch(), 120);
+    if (d.projectSearchInput) d.projectSearchInput.addEventListener('input', () => {
+      UI._projectSearchSelected = 0;
+      scheduleProjectSearch();
     });
+    [d.searchCaseSensitive, d.searchWholeWord].forEach((el) => {
+      if (el) el.addEventListener('change', () => { UI._projectSearchSelected = 0; UI.renderProjectSearch(); });
+    });
+    if (d.projectSearchInput) {
+      d.projectSearchInput.addEventListener('keydown', (event) => {
+        const count = (UI._projectSearchResults || []).length;
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const delta = event.key === 'ArrowDown' ? 1 : -1;
+          UI._projectSearchSelected = clamp((UI._projectSearchSelected || 0) + delta, 0, Math.max(0, count - 1));
+          UI._updateProjectSearchSelection();
+        } else if (event.key === 'Enter') {
+          event.preventDefault();
+          UI._activateProjectSearchResult(UI._projectSearchSelected || 0);
+        } else if (event.key === 'Escape') {
+          event.preventDefault();
+          UI.closeProjectSearch();
+        }
+      });
+    }
 
     // The existing UI binds console tabs too. The replacement below is used
     // by those listeners and by commands so all four views share one state.
@@ -213,6 +261,9 @@
       });
     });
 
+    setupMenuKeyboard(d.contextMenu, '[role="menuitem"]');
+    setupMenuKeyboard(d.menuDropdown, '.dropdown-item');
+    [d.quickOpenOverlay, d.commandPaletteOverlay, d.projectSearchOverlay, d.settingsOverlay].forEach(setupFocusTrap);
     bindExtraSettings();
     setupExplorerResize();
     setupTouchPanelResize();
@@ -249,9 +300,10 @@
       const active = tab.dataset.panel === panel;
       tab.classList.toggle('active', active);
       tab.setAttribute('aria-selected', active ? 'true' : 'false');
+      tab.tabIndex = active ? 0 : -1;
     });
     if (d.workspace && d.workspace.classList.contains('console-hidden')) {
-      d.workspace.classList.remove('console-hidden');
+      Commands.setPanelPosition(State.settings.lastPanelPosition || 'bottom');
       setTimeout(() => { if (Editor.editor && Editor.editor.layout) Editor.editor.layout(); }, 20);
     }
     if (panel === 'preview') this.refreshPreview();
@@ -262,6 +314,10 @@
   UI.closeAllOverlays = function () {
     originalCloseAllOverlays.call(this);
     if (this.dom.projectSearchOverlay) this.dom.projectSearchOverlay.hidden = true;
+    if (this.dom.projectSearchInput) {
+      this.dom.projectSearchInput.setAttribute('aria-expanded', 'false');
+      this.dom.projectSearchInput.removeAttribute('aria-activedescendant');
+    }
   };
 
   UI.appendOutput = function (message, kind) {
@@ -355,23 +411,22 @@
       entries = value.map((item, index) => [String(index), item]);
     } else if (value instanceof Map) {
       label = 'Map(' + value.size + ')';
-      entries = Array.from(value.entries()).map((entry, index) => [String(index), entry[0] + ' → ' + entry[1]]);
+      entries = Array.from(value.entries()).map((entry, index) => [String(index), { key: entry[0], value: entry[1] }]);
     } else if (value instanceof Set) {
       label = 'Set(' + value.size + ')';
       entries = Array.from(value.values()).map((item, index) => [String(index), item]);
     } else {
-      label = 'Object';
-      entries = Object.keys(value).map((key) => [key, value[key]]);
+      const keys = Object.keys(value);
+      label = 'Object {' + keys.slice(0, 3).join(', ') + (keys.length > 3 ? ', …' : '') + '}';
+      entries = keys.map((key) => [key, value[key]]);
     }
     if (!entries.length) {
       const span = document.createElement('span');
-      span.textContent = label + ' {}';
+      span.textContent = label;
       return span;
     }
     const details = document.createElement('details');
     details.className = 'console-object';
-    // Keep the first level open for useful learning output; deep values stay collapsed.
-    if (depth === 0) details.open = true;
     const summary = document.createElement('summary');
     summary.textContent = label;
     details.appendChild(summary);
@@ -446,6 +501,11 @@
     if (empty) empty.remove();
     const line = document.createElement('div');
     line.className = 'console-line ' + (level || 'log');
+    const groupDepth = Math.max(0, Math.min(20, Number(meta && meta.groupDepth) || 0));
+    if (groupDepth) {
+      line.classList.add('console-grouped');
+      line.style.setProperty('--console-group-indent', (groupDepth * 14) + 'px');
+    }
     const icon = document.createElement('span');
     icon.className = 'cl-icon';
     icon.textContent = ({ log: '›', info: 'ℹ', warn: '⚠', error: '✕', debug: '●', success: '✓', result: '⇐' })[level] || '›';
@@ -533,7 +593,9 @@
       });
     }
     State.diagnostics = problems;
-    if (!problems.length && this.editor && this.editor.deltaDecorations && this._problemHighlight && this._problemHighlight.length) {
+    // Marker updates invalidate the previous jump highlight, even when other
+    // files still have diagnostics. Never leave a stale range decorated.
+    if (this.editor && this.editor.deltaDecorations && this._problemHighlight && this._problemHighlight.length) {
       this._problemHighlight = this.editor.deltaDecorations(this._problemHighlight, []);
     }
     list.textContent = '';
@@ -554,7 +616,7 @@
       item.dataset.fileId = problem.fileId;
       item.dataset.line = String(problem.marker.startLineNumber);
       const icon = document.createElement('span');
-      const isError = problem.marker.severity === monaco.MarkerSeverity.Error;
+      const isError = problem.marker.severity === this.monaco.MarkerSeverity.Error;
       icon.className = isError ? 'sev-error' : 'sev-warning';
       icon.textContent = isError ? '✕' : '⚠';
       const copy = document.createElement('span');
@@ -599,12 +661,9 @@
   const originalEditorInit = Editor.init;
   Editor.init = async function (container) {
     const result = await originalEditorInit.call(this, container);
-    if (this.monaco && this.monaco.editor) {
-      if (!this._upgradeMarkerListener) {
-        this._upgradeMarkerListener = this.monaco.editor.onDidChangeMarkers(() => this._scheduleProblemRefresh());
-      }
-      this._scheduleProblemRefresh();
-    }
+    // The core editor listener calls the upgraded canonical renderer directly;
+    // this initial refresh covers models restored during startup.
+    if (this.monaco && this.monaco.editor) this._scheduleProblemRefresh();
     return result;
   };
 
@@ -705,7 +764,8 @@
   Editor.getModel = function (file) {
     const model = originalEditorGetModel.call(this, file);
     if (model && !model._jspUpgradeOutlineListener) {
-      model._jspUpgradeOutlineListener = model.onDidChangeContent(() => Utils.debounce(() => UI.renderOutline(), 120)());
+      model._jspRenderOutline = Utils.debounce(() => UI.renderOutline(), 120);
+      model._jspUpgradeOutlineListener = model.onDidChangeContent(model._jspRenderOutline);
     }
     return model;
   };
@@ -716,7 +776,7 @@
     const s = State.settings;
     if (this.editor && this.editor.updateOptions) {
       this.editor.updateOptions({
-        fontFamily: s.fontFamily || 'JetBrains Mono',
+        fontFamily: editorFontStack(s.fontFamily),
         fontLigatures: s.ligatures !== false,
         lineNumbers: s.lineNumbers === false ? 'off' : 'on'
       });
@@ -729,24 +789,29 @@
   // Add a first-class Monaco action and context-menu entry.
   const originalRefreshActions = Editor.refreshActions;
   Editor.refreshActions = function () {
-    if (this._upgradeSelectionAction) { try { this._upgradeSelectionAction.dispose(); } catch (_) {} this._upgradeSelectionAction = null; }
+    (this._upgradeActions || []).forEach((action) => { try { action.dispose(); } catch (_) {} });
+    this._upgradeActions = [];
     return originalRefreshActions.call(this);
   };
   const originalRegisterActions = Editor._registerActions;
   Editor._registerActions = function () {
     originalRegisterActions.call(this);
-    if (!this.editor || !this.monaco || this._upgradeSelectionAction) return;
-    const chord = KeyBindings && KeyBindings.chordFor('runSelection');
-    const keybinding = chord && this._chordToMonaco ? this._chordToMonaco(chord) : null;
-    const options = {
-      id: 'jsp.run-selection',
-      label: 'Run Selection',
-      contextMenuGroupId: 'navigation',
-      contextMenuOrder: 1,
-      run: () => Commands.runSelection('editor')
+    if (!this.editor || !this.monaco || (this._upgradeActions && this._upgradeActions.length)) return;
+    const add = (id, label, actionId, run, contextMenu) => {
+      const chord = KeyBindings && KeyBindings.chordFor(actionId);
+      const keybinding = chord && this._chordToMonaco ? this._chordToMonaco(chord) : null;
+      const options = { id, label, run };
+      if (contextMenu) {
+        options.contextMenuGroupId = 'navigation';
+        options.contextMenuOrder = 1;
+      }
+      if (keybinding) options.keybindings = [keybinding];
+      this._upgradeActions.push(this.editor.addAction(options));
     };
-    if (keybinding) options.keybindings = [keybinding];
-    this._upgradeSelectionAction = this.editor.addAction(options);
+    this._upgradeActions = [];
+    add('jsp.run-selection', 'Run Selection', 'runSelection', () => Commands.runSelection('editor'), true);
+    add('jsp.search-project', 'Search Project', 'searchProject', () => UI.openProjectSearch());
+    add('jsp.save-all', 'Save All', 'saveAll', () => Commands.saveAll());
   };
 
   /* ------------------------------------------------------------------
@@ -780,7 +845,7 @@
     const node = State.findNode(nodeId);
     const target = State.findNode(targetFolderId);
     if (!node || !target || node.id === 'root' || target.type !== 'folder' || node.id === target.id) return { ok: false, error: 'Invalid move.' };
-    if (node.type === 'folder' && isDescendant(target, node.id)) return { ok: false, error: 'A folder cannot be moved inside itself.' };
+    if (node.type === 'folder' && isDescendant(node, target.id)) return { ok: false, error: 'A folder cannot be moved inside itself.' };
     const existing = (target.children || []).find((child) => child.id !== node.id && child.name.toLowerCase() === node.name.toLowerCase());
     if (existing) return { ok: false, error: 'A file or folder with that name already exists here.' };
     const source = State.findParent(nodeId);
@@ -826,6 +891,49 @@
     }
     return item;
   };
+
+  function setupFocusTrap(overlay) {
+    if (!overlay || overlay._jspFocusTrapBound) return;
+    overlay._jspFocusTrapBound = true;
+    overlay.addEventListener('keydown', (event) => {
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(overlay.querySelectorAll('button:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])'))
+        .filter((item) => !item.hidden && !item.closest('[hidden]') && item.getAttribute('aria-hidden') !== 'true');
+      if (!focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    });
+  }
+
+  function setupMenuKeyboard(menu, selector) {
+    if (!menu || menu._jspKeyboardBound) return;
+    menu._jspKeyboardBound = true;
+    menu.addEventListener('keydown', (event) => {
+      const items = Array.from(menu.querySelectorAll(selector)).filter((item) => !item.hidden);
+      if (!items.length) return;
+      const current = Math.max(0, items.indexOf(document.activeElement));
+      let next = current;
+      if (event.key === 'ArrowDown') next = (current + 1) % items.length;
+      else if (event.key === 'ArrowUp') next = (current - 1 + items.length) % items.length;
+      else if (event.key === 'Home') next = 0;
+      else if (event.key === 'End') next = items.length - 1;
+      else if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        items[current].click();
+        return;
+      } else if (event.key === 'Escape') { UI.hideContextMenu(); UI.closeMenu(); return; }
+      else return;
+      event.preventDefault();
+      items[next].focus();
+    });
+  }
 
   function setupDragAndDrop() {
     const tree = UI.dom.fileTree;
@@ -917,12 +1025,18 @@
 
   Commands.saveFile = function (fileId) {
     const file = State.files.get(fileId);
-    if (!file) return Promise.resolve();
+    if (!file) return Promise.resolve(false);
     if (file.id === State.activeFileId && Editor.editor && Editor.editor.getModel) {
       const model = Editor.editor.getModel(); if (model) file.content = model.getValue();
     }
+    const previousSavedContent = file.savedContent;
     State.markSaved(file.id);
-    return Promise.all([Commands.persistProject(), Commands.persistState()]).then(() => { UI.renderTabs(); UI.updateSaveStatus('saved'); UI.appendOutput('File saved', 'success'); });
+    return Promise.all([Commands.persistProject(), Commands.persistState()]).then(() => {
+      UI.renderTabs(); UI.updateSaveStatus('saved'); UI.appendOutput('File saved', 'success'); return true;
+    }).catch((error) => {
+      file.savedContent = previousSavedContent;
+      UI.renderTabs(); UI.updateSaveStatus('error', error && error.message); UI.toast('Save failed', 'error'); return false;
+    });
   };
 
   const originalResetProjectCommand = Commands.resetProject;
@@ -937,7 +1051,9 @@
   const originalSaveCommand = Commands.save;
   Commands.save = function () {
     const result = originalSaveCommand.call(this);
-    Promise.resolve(result).then(() => UI.appendOutput('File saved', 'success'));
+    Promise.resolve(result).then((saved) => {
+      if (saved) UI.appendOutput('File saved', 'success');
+    });
     return result;
   };
   const originalNewFileCommand = Commands.newFile;
@@ -950,6 +1066,7 @@
       const model = Editor.editor.getModel && Editor.editor.getModel();
       if (model) { const file = State.files.get(State.activeFileId); if (file) file.content = model.getValue(); }
     }
+    const previousSavedContent = new Map(Array.from(State.files.entries(), ([id, file]) => [id, file.savedContent]));
     State.markAllSaved();
     UI.updateSaveStatus('saving');
     return Promise.all([Commands.persistProject(), Commands.persistState()]).then(() => {
@@ -957,6 +1074,13 @@
       UI.renderTabs();
       UI.appendOutput('All files saved', 'success');
       UI.toast('All files saved', 'success');
+      return true;
+    }).catch((error) => {
+      previousSavedContent.forEach((content, id) => { const file = State.files.get(id); if (file) file.savedContent = content; });
+      UI.updateSaveStatus('error', error && error.message);
+      UI.renderTabs();
+      UI.toast('Save All failed', 'error');
+      return false;
     });
   };
 
@@ -974,15 +1098,21 @@
 
   Commands.closeOthers = async function (fileId) {
     const keep = fileId || State.activeFileId;
-    for (const id of State.openTabs.slice()) if (id !== keep) await Commands.closeFile(id);
+    for (const id of State.openTabs.slice()) {
+      if (id !== keep && await Commands.closeFile(id) === false) break;
+    }
   };
   Commands.closeAll = async function () {
-    for (const id of State.openTabs.slice()) await Commands.closeFile(id);
+    for (const id of State.openTabs.slice()) {
+      if (await Commands.closeFile(id) === false) break;
+    }
   };
 
-  const originalTogglePanel = Commands.togglePanel;
   Commands.togglePanel = function () {
-    const visible = originalTogglePanel.call(this);
+    const hidden = UI.dom.workspace.classList.contains('console-hidden');
+    if (hidden) this.setPanelPosition(State.settings.lastPanelPosition || 'bottom');
+    else this.setPanelPosition('hidden');
+    const visible = hidden;
     if (UI.dom.btnConsoleToggle) UI.dom.btnConsoleToggle.setAttribute('aria-expanded', visible ? 'true' : 'false');
     return visible;
   };
@@ -1017,16 +1147,22 @@
   const originalSetPanelPosition = Commands.setPanelPosition;
   Commands.setPanelPosition = function (position) {
     if (position === 'hidden') {
+      if (State.settings.panelPosition === 'right' || State.settings.panelPosition === 'bottom') {
+        State.settings.lastPanelPosition = State.settings.panelPosition;
+      }
       State.settings.panelPosition = 'hidden';
       UI.dom.workspace.classList.add('console-hidden');
       if (UI.dom.setPanelPosition) UI.dom.setPanelPosition.value = 'hidden';
+      if (UI.dom.btnConsoleToggle) UI.dom.btnConsoleToggle.setAttribute('aria-expanded', 'false');
       Commands.persistSettings();
       if (Editor.editor && Editor.editor.layout) setTimeout(() => Editor.editor.layout(), 20);
       return;
     }
     if (position === 'right' || position === 'bottom') {
+      State.settings.lastPanelPosition = position;
       originalSetPanelPosition.call(this, position);
       State.settings.panelPosition = position;
+      if (UI.dom.btnConsoleToggle) UI.dom.btnConsoleToggle.setAttribute('aria-expanded', 'true');
     }
   };
 
@@ -1034,12 +1170,12 @@
   Commands.list = function () {
     const list = originalCommandsList.call(this);
     const extra = [
-      { label: 'Run File', category: 'Execution', run: () => Commands.run('palette') },
       { label: 'Run Selection', category: 'Execution', run: () => Commands.runSelection('palette') },
       { label: 'Save All', category: 'File', run: () => Commands.saveAll() },
       { label: 'Duplicate File', category: 'File', run: () => Commands.duplicateFile() },
       { label: 'Close Others', category: 'File', run: () => Commands.closeOthers() },
       { label: 'Close All Files', category: 'File', run: () => Commands.closeAll() },
+      { label: 'Quick Open', category: 'Navigation', run: () => UI.openQuickOpen() },
       { label: 'Search Project', category: 'Navigation', run: () => UI.openProjectSearch() },
       { label: 'Toggle Explorer', category: 'View', run: () => Commands.toggleSidebar() },
       { label: 'Toggle Console', category: 'View', run: () => Commands.togglePanel() },
@@ -1067,12 +1203,21 @@
     };
   }
 
-  // Monaco already owns these keybindings inside its editor textarea. Letting
-  // the document listener fire as well would turn a run into run-then-stop.
+  // Monaco owns the editor actions registered above. Do not let the bubbling
+  // document listener execute the same action a second time.
   const originalShortcutOnKeyDown = JSP.Shortcuts.onKeyDown;
   JSP.Shortcuts.onKeyDown = function (event) {
     const inMonaco = event.target && event.target.closest && event.target.closest('.monaco-editor');
-    if (inMonaco && (event.ctrlKey || event.metaKey) && event.key === 'Enter') return;
+    if (inMonaco && KeyBindings) {
+      const chord = KeyBindings.fromEvent(event);
+      const action = KeyBindings.buildChordMap().get(chord);
+      const editorOwned = new Set([
+        'run', 'runSelection', 'save', 'saveAll', 'newFile', 'closeFile',
+        'commandPalette', 'quickOpen', 'searchProject', 'toggleSidebar',
+        'formatDocument', 'clearConsole', 'find', 'replace'
+      ]);
+      if (editorOwned.has(action)) return;
+    }
     return originalShortcutOnKeyDown.call(this, event);
   };
 
@@ -1127,9 +1272,6 @@
     }
     if (name === 'view') {
       items.push('-', { label: 'Search Project', shortcut: this._sc('searchProject'), action: () => UI.openProjectSearch() }, { label: 'Reset Layout', action: () => Commands.resetLayout() }, { label: 'Toggle Preview', action: () => UI.switchConsoleTab('preview') }, { label: 'Hide Panel', action: () => Commands.setPanelPosition('hidden') });
-    }
-    if (name === 'file') {
-      items.splice(5, 0, { label: 'Save All', shortcut: this._sc('saveAll'), action: () => Commands.saveAll() });
     }
     return items;
   };
@@ -1192,13 +1334,36 @@
     this.closeAllOverlays();
     if (!this.dom.projectSearchOverlay) return;
     this.dom.projectSearchOverlay.hidden = false;
+    this.dom.projectSearchInput.setAttribute('aria-expanded', 'true');
     this.dom.projectSearchInput.value = '';
+    this._projectSearchSelected = 0;
     this.renderProjectSearch();
     setTimeout(() => this.dom.projectSearchInput.focus(), 0);
   };
   UI.closeProjectSearch = function () {
     if (this.dom.projectSearchOverlay) this.dom.projectSearchOverlay.hidden = true;
+    if (this.dom.projectSearchInput) {
+      this.dom.projectSearchInput.setAttribute('aria-expanded', 'false');
+      this.dom.projectSearchInput.removeAttribute('aria-activedescendant');
+    }
     if (Editor.editor) Editor.focus();
+  };
+  UI._updateProjectSearchSelection = function () {
+    const items = Array.from(this.dom.projectSearchResults.querySelectorAll('li[role="option"]'));
+    items.forEach((item, index) => {
+      const selected = index === (this._projectSearchSelected || 0);
+      item.classList.toggle('selected', selected);
+      item.setAttribute('aria-selected', selected ? 'true' : 'false');
+    });
+    const selected = items[this._projectSearchSelected || 0];
+    if (this.dom.projectSearchInput) this.dom.projectSearchInput.setAttribute('aria-activedescendant', selected ? selected.id : '');
+    if (selected && selected.scrollIntoView) selected.scrollIntoView({ block: 'nearest' });
+  };
+  UI._activateProjectSearchResult = function (index) {
+    const result = (this._projectSearchResults || [])[index];
+    if (!result) return;
+    this.closeProjectSearch();
+    openOrFocusFile(result.fileId, result.line, result.column, result.column + result.length);
   };
   UI.renderProjectSearch = function () {
     const input = this.dom.projectSearchInput;
@@ -1207,6 +1372,7 @@
     const query = input.value;
     list.textContent = '';
     if (!query) {
+      this._projectSearchResults = [];
       const empty = document.createElement('li'); empty.className = 'quick-open-empty'; empty.textContent = 'Type to search across the project.'; list.appendChild(empty); return;
     }
     const flags = this.dom.searchCaseSensitive && this.dom.searchCaseSensitive.checked ? 'g' : 'gi';
@@ -1220,23 +1386,31 @@
         regex.lastIndex = 0;
         let match;
         while ((match = regex.exec(line)) && results.length < 250) {
-          results.push({ fileId: file.id, path: file.path, line: index + 1, column: match.index + 1, text: line.trim() });
+          results.push({ fileId: file.id, path: file.path, line: index + 1, column: match.index + 1, length: match[0].length, text: line.trim() });
           if (!regex.global) break;
           if (match[0] === '') regex.lastIndex++;
         }
       });
     });
+    this._projectSearchResults = results;
+    this._projectSearchSelected = clamp(this._projectSearchSelected || 0, 0, Math.max(0, results.length - 1));
     if (!results.length) { const empty = document.createElement('li'); empty.className = 'quick-open-empty'; empty.textContent = 'No matches.'; list.appendChild(empty); return; }
-    results.forEach((result) => {
-      const li = document.createElement('li'); li.setAttribute('role', 'option');
+    results.forEach((result, resultIndex) => {
+      const li = document.createElement('li');
+      li.setAttribute('role', 'option');
+      li.id = 'project-search-option-' + resultIndex;
+      li.setAttribute('aria-selected', resultIndex === this._projectSearchSelected ? 'true' : 'false');
+      li.classList.toggle('selected', resultIndex === this._projectSearchSelected);
       const icon = document.createElement('span'); icon.textContent = '⌕';
       const copy = document.createElement('span'); copy.className = 'search-result-copy';
       const file = document.createElement('span'); file.className = 'search-result-file'; file.textContent = result.path + ':' + result.line;
       const line = document.createElement('span'); line.className = 'search-result-line'; line.textContent = result.text;
       copy.append(file, line); li.append(icon, copy);
-      li.addEventListener('click', () => { UI.closeProjectSearch(); openOrFocusFile(result.fileId, result.line, result.column, result.column + query.length); });
+      li.addEventListener('click', () => this._activateProjectSearchResult(resultIndex));
+      li.addEventListener('mouseenter', () => { this._projectSearchSelected = resultIndex; this._updateProjectSearchSelection(); });
       list.appendChild(li);
     });
+    this._updateProjectSearchSelection();
   };
 
   function escapeRegExp(value) { return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -1295,6 +1469,7 @@
         submit.removeEventListener('click', submitHandler);
         cancel.removeEventListener('click', cancelHandler);
         this.dom.inputValue.removeEventListener('keydown', keyHandler);
+        dialog.removeEventListener('cancel', dialogCancelHandler);
         try { dialog.close(); } catch (_) { dialog.hidden = true; }
         if (this._inputCancel === cancelInput) this._inputCancel = null;
         resolve(value);
@@ -1306,6 +1481,7 @@
       const cancel = dialog.querySelector('[data-action="cancel"]');
       const submitHandler = () => finish(this.dom.inputValue.value);
       const cancelHandler = () => finish(null);
+      const dialogCancelHandler = (event) => { event.preventDefault(); finish(null); };
       const keyHandler = (event) => {
         if (event.key === 'Enter') { event.preventDefault(); submitHandler(); }
         else if (event.key === 'Escape') { event.preventDefault(); cancelHandler(); }
@@ -1313,6 +1489,7 @@
       submit.addEventListener('click', submitHandler);
       cancel.addEventListener('click', cancelHandler);
       this.dom.inputValue.addEventListener('keydown', keyHandler);
+      dialog.addEventListener('cancel', dialogCancelHandler);
       if (typeof dialog.showModal === 'function') { if (!dialog.open) dialog.showModal(); } else dialog.hidden = false;
       setTimeout(() => { this.dom.inputValue.focus(); this.dom.inputValue.select(); }, 0);
     });
@@ -1320,21 +1497,41 @@
 
   UI.cancelInput = function () { if (this._inputCancel) this._inputCancel(); };
 
+  function previewDocument(source) {
+    const escaped = String(source || '').replace(/<\/script/gi, '<\\/script');
+    return '<!doctype html><html><head><meta charset="utf-8">' +
+      '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\'; style-src \'unsafe-inline\'; img-src data: blob:; connect-src \'none\'; object-src \'none\'; frame-src \'none\'; form-action \'none\'; base-uri \'none\'">' +
+      '<style>body{font:16px/1.5 system-ui;color:#18212b;padding:20px;margin:0}button,input{font:inherit;padding:8px 12px}</style>' +
+      '</head><body><script>' + escaped + '<\/script></body></html>';
+  }
+
   UI.refreshPreview = function () {
-    const frame = this.dom.previewFrame;
-    if (!frame) return;
-    const source = activeSource();
-    const escaped = source.replace(/<\/script/gi, '<\\/script');
-    frame.srcdoc = '<!doctype html><html><head><meta charset="utf-8"><style>body{font:16px system-ui;color:#18212b;padding:20px}button{padding:8px 12px}</style></head><body><script>' + escaped + '<\/script></body></html>';
+    const documentText = previewDocument(activeSource());
+    if (this.dom.previewFrame) this.dom.previewFrame.srcdoc = documentText;
+    if (this.dom.previewDialog && this.dom.previewDialog.open && this.dom.previewDialogFrame) {
+      this.dom.previewDialogFrame.srcdoc = documentText;
+    }
   };
-  UI.clearPreview = function () { if (this.dom.previewFrame) this.dom.previewFrame.srcdoc = '<!doctype html><html><body></body></html>'; };
+  UI.clearPreview = function () {
+    const empty = previewDocument('');
+    if (this.dom.previewFrame) this.dom.previewFrame.srcdoc = empty;
+    if (this.dom.previewDialogFrame) this.dom.previewDialogFrame.srcdoc = empty;
+  };
   UI.openPreviewWindow = function () {
-    const source = activeSource().replace(/<\/script/gi, '<\\/script');
-    const blob = new Blob(['<!doctype html><html><body><script>' + source + '<\/script></body></html>'], { type: 'text/html' });
-    const url = URL.createObjectURL(blob);
-    const win = global.open(url, '_blank', 'noopener');
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
-    if (!win) this.toast('Allow pop-ups to open the preview.', 'warn');
+    const dialog = this.dom.previewDialog;
+    const frame = this.dom.previewDialogFrame;
+    if (!dialog || !frame) return;
+    frame.srcdoc = previewDocument(activeSource());
+    const close = dialog.querySelector('[data-action="close"]');
+    const refresh = dialog.querySelector('[data-action="refresh"]');
+    close.onclick = () => { try { dialog.close(); } catch (_) { dialog.hidden = true; } };
+    refresh.onclick = () => { frame.srcdoc = previewDocument(activeSource()); };
+    if (typeof dialog.showModal === 'function') {
+      if (!dialog.open) dialog.showModal();
+    } else {
+      dialog.hidden = false;
+    }
+    close.focus();
   };
 
   function persistHistory() {
@@ -1471,15 +1668,6 @@
       const save = dialog.querySelector('[data-action="save"]'); if (save) save.focus();
     });
   };
-  const originalCloseFile = Commands.closeFile;
-  Commands.closeFile = async function (fileId) {
-    if (!State.settings.confirmClose) {
-      const file = State.files.get(fileId);
-      if (file && State.isDirty(fileId)) State.markSaved(fileId);
-    }
-    return originalCloseFile.call(this, fileId);
-  };
-
   // Expose a small diagnostics/testing surface for static-host smoke tests.
   JSP.Upgrade = { PRACTICE, renderValue, renderTable, persistHistory };
 

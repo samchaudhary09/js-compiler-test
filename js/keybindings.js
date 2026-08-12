@@ -95,44 +95,42 @@
   /** Normalize a chord string to a canonical lowercase form. */
   function normalize(chord) {
     if (!chord) return '';
-    const parts = String(chord).toLowerCase().split(/\s*\+\s*/).map((p) => p.trim()).filter(Boolean);
-    const mods = { ctrl: false, alt: false, shift: false, meta: false };
-    const keys = [];
-    for (let p of parts) {
-      if (p === 'control' || p === 'ctrl' || p === 'ctl' || p === 'cmd' || p === 'command' || p === 'win' || p === 'windows' || p === 'meta' || p === '⌘') {
-        // ctrl and meta are treated as the logical "mod" — on mac maps to meta, elsewhere ctrl.
-        // We preserve them separately so a user can bind ctrl+x on mac explicitly.
-        if (p === 'cmd' || p === 'command' || p === 'win' || p === 'windows' || p === 'meta' || p === '⌘') mods.meta = true;
-        else mods.ctrl = true;
-      } else if (p === 'alt' || p === 'option' || p === '⌥') {
-        mods.alt = true;
-      } else if (p === 'shift' || p === '⇧') {
-        mods.shift = true;
-      } else if (p === 'space') {
-        keys.push(' ');
-      } else if (p === 'esc' || p === 'escape') {
-        keys.push('escape');
-      } else if (p === 'enter' || p === 'return') {
-        keys.push('enter');
-      } else if (p === 'tab') {
-        keys.push('tab');
-      } else if (p === 'backspace' || p === 'delete') {
-        keys.push(p === 'delete' && !parts.includes('backspace') ? 'delete' : 'backspace');
-      } else if (/^f\d{1,2}$/.test(p)) {
-        keys.push(p);
-      } else if (p.length === 1) {
-        keys.push(p);
-      } else {
-        keys.push(p);
+    // Chord sequences use either whitespace or ">" between strokes, for
+    // example "ctrl+k ctrl+t". Normalize each stroke independently.
+    return String(chord).trim().toLowerCase().split(/\s*>\s*|\s+/).filter(Boolean).map((stroke) => {
+      const parts = stroke.split(/\s*\+\s*/).map((part) => part.trim()).filter(Boolean);
+      const mods = { ctrl: false, alt: false, shift: false, meta: false };
+      const keys = [];
+      for (let part of parts) {
+        if (part === 'control' || part === 'ctrl' || part === 'ctl' || part === 'cmd' || part === 'command' || part === 'win' || part === 'windows' || part === 'meta' || part === '⌘') {
+          if (part === 'cmd' || part === 'command' || part === 'win' || part === 'windows' || part === 'meta' || part === '⌘') mods.meta = true;
+          else mods.ctrl = true;
+        } else if (part === 'alt' || part === 'option' || part === '⌥') {
+          mods.alt = true;
+        } else if (part === 'shift' || part === '⇧') {
+          mods.shift = true;
+        } else if (part === 'space') {
+          keys.push('space');
+        } else if (part === 'esc' || part === 'escape') {
+          keys.push('escape');
+        } else if (part === 'enter' || part === 'return') {
+          keys.push('enter');
+        } else if (part === 'tab') {
+          keys.push('tab');
+        } else if (part === 'backspace' || part === 'delete') {
+          keys.push(part);
+        } else {
+          keys.push(part);
+        }
       }
-    }
-    const out = [];
-    if (mods.ctrl) out.push('ctrl');
-    if (mods.alt) out.push('alt');
-    if (mods.shift) out.push('shift');
-    if (mods.meta) out.push('meta');
-    out.push(...keys);
-    return out.join('+');
+      const out = [];
+      if (mods.ctrl) out.push('ctrl');
+      if (mods.alt) out.push('alt');
+      if (mods.shift) out.push('shift');
+      if (mods.meta) out.push('meta');
+      out.push(...keys);
+      return out.join('+');
+    }).filter(Boolean).join('>');
   }
 
   /** Convert a KeyboardEvent to a normalized chord. */
@@ -155,8 +153,9 @@
   function pretty(chord) {
     if (!chord) return '';
     const p = detectPlatform();
-    return chord.split('+').map((part) => {
-      if (part === 'ctrl' || part === 'meta') return p === 'mac' ? '⌘' : 'Ctrl';
+    const prettyStroke = (stroke) => stroke.split('+').map((part) => {
+      if (part === 'ctrl') return p === 'mac' ? '⌃' : 'Ctrl';
+      if (part === 'meta') return p === 'mac' ? '⌘' : 'Win';
       if (part === 'alt') return p === 'mac' ? '⌥' : 'Alt';
       if (part === 'shift') return p === 'mac' ? '⇧' : 'Shift';
       if (part === 'enter') return 'Enter';
@@ -168,6 +167,7 @@
       if (/^f\d{1,2}$/.test(part)) return part.toUpperCase();
       return part.charAt(0).toUpperCase() + part.slice(1);
     }).join(p === 'mac' ? '' : '+');
+    return normalize(chord).split('>').map(prettyStroke).join(' ');
   }
 
   /**
@@ -297,6 +297,7 @@
     normalize: normalize,
     fromEvent: fromEvent,
     matchEvent: matchEvent,
+    hasPendingSequence: function () { return !!partial; },
     findConflicts: findConflicts,
     setBinding: setBinding,
     resetBinding: resetBinding,
