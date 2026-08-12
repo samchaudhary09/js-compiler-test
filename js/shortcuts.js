@@ -62,6 +62,14 @@
             return;
           }
         }
+        // A first stroke such as Ctrl+K must also suppress the browser's
+        // default (for example focusing the address bar) while we wait for
+        // the second stroke of a configured sequence.
+        if (KeyBindings.hasPendingSequence && KeyBindings.hasPendingSequence()) {
+          e.preventDefault();
+          e.stopPropagation();
+          return;
+        }
       }
 
       if (this._isTextField(e.target) && !overlaysOpen) return;

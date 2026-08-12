@@ -175,7 +175,39 @@
      * Used by Import Project.
      */
     async importFileList(files) {
-      // Dispose existing models
+      if (!Array.isArray(files)) throw new Error('Import data must be a file list.');
+      if (files.length > 500) throw new Error('Import contains too many entries.');
+      const normalized = [];
+      const seen = new Set();
+      const folderPaths = new Set();
+      let totalBytes = 0;
+      for (const item of files) {
+        const path = String(item && item.path || '').replace(/\\/g, '/');
+        const parts = path.split('/').filter(Boolean);
+        const invalid = !parts.length || path.startsWith('/') || path.startsWith('~') || parts.length > 20 || parts.some((part) =>
+          part === '.' || part === '..' || part.length > 120 || /[:*?"<>|\u0000-\u001f]/.test(part)
+        );
+        if (invalid) throw new Error('Import contains an unsafe or invalid path.');
+        const fileName = parts[parts.length - 1];
+        if (!/\.(js|mjs|cjs|jsx)$/i.test(fileName)) continue;
+        const canonicalParts = parts.map((part) => part.toLowerCase());
+        const canonical = canonicalParts.join('/');
+        if (seen.has(canonical)) throw new Error('Import contains duplicate file paths.');
+        if (folderPaths.has(canonical)) throw new Error('Import contains a file/folder path collision.');
+        for (let i = 1; i < canonicalParts.length; i++) {
+          const folderPath = canonicalParts.slice(0, i).join('/');
+          if (seen.has(folderPath)) throw new Error('Import contains a file/folder path collision.');
+          folderPaths.add(folderPath);
+        }
+        const content = String(item && item.content || '');
+        totalBytes += new Blob([content]).size;
+        if (totalBytes > 2 * 1024 * 1024) throw new Error('Import is larger than the 2 MB browser limit.');
+        seen.add(canonical);
+        normalized.push({ parts, content });
+      }
+      if (!normalized.length) throw new Error('Import does not contain a supported JavaScript file.');
+
+      // Validate first, then replace the current project atomically.
       for (const model of State.models.values()) {
         try { model.dispose(); } catch (_) {}
       }
@@ -184,62 +216,45 @@
       State.files = new Map();
       State.openTabs = [];
       State.activeFileId = null;
-
       State.project = {
         id: 'root',
         type: 'folder',
         name: 'JS Playground',
         expanded: true,
+        _learningLibraryVersion: 1,
         children: []
       };
 
-      // Sort so folders are created implicitly in order.
-      files.sort((a, b) => a.path.localeCompare(b.path));
-      for (const f of files) {
-        const safePath = String(f.path || '').replace(/\\/g, '/');
-        const parts = safePath.split('/').filter(Boolean);
-        if (parts.length === 0 || safePath.startsWith('/') || parts.some((part) => part === '..' || part === '.' || /[\u0000-\u001f]/.test(part))) continue;
+      normalized.sort((a, b) => a.parts.join('/').localeCompare(b.parts.join('/')));
+      for (const item of normalized) {
+        const parts = item.parts;
         let parent = State.project;
         for (let i = 0; i < parts.length - 1; i++) {
           const folderName = parts[i];
-          let next = (parent.children || []).find((c) => c.type === 'folder' && c.name === folderName);
+          let next = (parent.children || []).find((child) => child.type === 'folder' && child.name.toLowerCase() === folderName.toLowerCase());
           if (!next) {
-            next = {
-              id: Utils.uid('folder'),
-              type: 'folder',
-              name: folderName,
-              expanded: true,
-              children: []
-            };
+            next = { id: Utils.uid('folder'), type: 'folder', name: folderName, expanded: true, children: [] };
             parent.children = parent.children || [];
             parent.children.push(next);
           }
           parent = next;
         }
-        const fileName = parts[parts.length - 1];
-        if (!/\.(js|mjs|cjs|jsx)$/i.test(fileName)) continue;
         const file = {
           id: Utils.uid('file'),
           type: 'file',
-          name: fileName,
+          name: parts[parts.length - 1],
           language: 'javascript',
-          content: f.content || '',
-          savedContent: f.content || ''
+          content: item.content,
+          savedContent: item.content
         };
         parent.children = parent.children || [];
         parent.children.push(file);
         State.files.set(file.id, file);
       }
 
-      if (State.files.size === 0) {
-        // No valid JS files imported — reset to defaults.
-        State.resetToDefaults();
-      } else {
-        // Open first file
-        const first = State.files.values().next().value;
-        State.openTabs.push(first.id);
-        State.activeFileId = first.id;
-      }
+      const first = State.files.values().next().value;
+      State.openTabs.push(first.id);
+      State.activeFileId = first.id;
     }
   };
 

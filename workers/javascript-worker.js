@@ -6,6 +6,23 @@
   // Capture a reference to the host's postMessage so user code cannot
   // spoof messages by reassigning a variable in its own scope.
   const postMessageToHost = self.postMessage.bind(self);
+  const nativeSetTimeout = self.setTimeout.bind(self);
+  const nativeClearTimeout = self.clearTimeout.bind(self);
+  const nativeSetInterval = self.setInterval.bind(self);
+  const nativeClearInterval = self.clearInterval.bind(self);
+
+  // A same-origin worker can normally see IndexedDB and CacheStorage. The
+  // playground never needs those APIs, so hide them before user code runs.
+  // Lexical shadowing below provides the primary guard; non-configurable own
+  // properties also block common Function-constructor escape attempts.
+  [
+    'indexedDB', 'webkitIndexedDB', 'mozIndexedDB', 'caches',
+    'fetch', 'XMLHttpRequest', 'WebSocket', 'WebTransport', 'EventSource',
+    'Worker', 'SharedWorker', 'BroadcastChannel', 'importScripts',
+    'postMessage', 'close'
+  ].forEach((name) => {
+    try { Object.defineProperty(self, name, { value: undefined, writable: false, configurable: false }); } catch (_) {}
+  });
 
   let currentToken = 0;
   let inputRequestId = 0;
@@ -57,13 +74,15 @@
     }
   }
 
+  let consoleGroupDepth = 0;
+
   function sendConsole(level, args, meta) {
     try {
       const serialized = args.map((a) => {
         try { return serialize(a); }
         catch (_) { return { type: 'string', value: String(a) }; }
       });
-      postMessageToHost({ type: 'console', level: level, args: serialized, table: !!(meta && meta.table), token: currentToken });
+      postMessageToHost({ type: 'console', level: level, args: serialized, table: !!(meta && meta.table), groupDepth: consoleGroupDepth, token: currentToken });
     } catch (e) {
       postMessageToHost({ type: 'console', level: 'error', args: [{ type: 'string', value: 'Failed to serialize console output: ' + e.message }], token: currentToken });
     }
@@ -84,8 +103,9 @@
     debug: function () { sendConsole('debug', Array.prototype.slice.call(arguments)); },
     table: function () { sendConsole('log', Array.prototype.slice.call(arguments), { table: true }); },
     dir: function () { sendConsole('log', Array.prototype.slice.call(arguments)); },
-    group: function () { sendConsole('log', Array.prototype.slice.call(arguments)); },
-    groupEnd: function () {},
+    group: function () { sendConsole('log', Array.prototype.slice.call(arguments)); consoleGroupDepth = Math.min(20, consoleGroupDepth + 1); },
+    groupCollapsed: function () { sendConsole('log', Array.prototype.slice.call(arguments)); consoleGroupDepth = Math.min(20, consoleGroupDepth + 1); },
+    groupEnd: function () { consoleGroupDepth = Math.max(0, consoleGroupDepth - 1); },
     time: function (label) { timers[label || 'default'] = Date.now(); },
     timeEnd: function (label) {
       const key = label || 'default';
@@ -105,6 +125,7 @@
       delete counters[key];
     },
     clear: function () {
+      consoleGroupDepth = 0;
       postMessageToHost({ type: 'clear', token: currentToken });
       notifyActivity();
     },
@@ -189,19 +210,22 @@
     const name = err.name || (err.constructor && err.constructor.name) || 'Error';
     const message = err.message != null ? String(err.message) : String(err);
     let line = null;
-    if (typeof err.lineNumber === 'number') line = err.lineNumber;
-    else if (err.stack) {
-      // Stack traces inside the AsyncFunction look like:
-      //   at <anonymous>:LINE:COL
-      // or, on some engines, evalmachine.<anonymous>:LINE:COL
-      let m = /<anonymous>:(\d+):(\d+)/.exec(err.stack);
-      if (!m) m = /evalmachine\.<anonymous>:(\d+):(\d+)/.exec(err.stack);
-      if (!m) {
-        // Generic first match after a colon+digits.
-        m = /:(\d+):(\d+)/.exec(err.stack);
+    let generatedFunctionLine = false;
+    if (typeof err.lineNumber === 'number') {
+      line = err.lineNumber;
+      generatedFunctionLine = true;
+    } else if (err.stack) {
+      // AsyncFunction adds two wrapper lines before the supplied source.
+      // Match only generated-code frames so worker implementation lines are
+      // never misreported as user-code locations (especially syntax errors).
+      let match = /<anonymous>:(\d+):(\d+)/.exec(err.stack);
+      if (!match) match = /evalmachine\.<anonymous>:(\d+):(\d+)/.exec(err.stack);
+      if (match) {
+        line = parseInt(match[1], 10);
+        generatedFunctionLine = true;
       }
-      if (m) line = parseInt(m[1], 10);
     }
+    if (generatedFunctionLine && line > 2) line -= 2;
     return { name: name, message: message, line: line || fallbackLine || null, stack: err.stack || null };
   }
 
@@ -214,67 +238,76 @@
    * (b) no tracked timers are pending AND a short idle grace period
    *     has elapsed without new work being scheduled.
    * ---------------------------------------------------------------- */
-  let pendingTimers = 0;
+  const pendingTimeouts = new Set();
+  const pendingIntervals = new Set();
   let idleCheckHandle = null;
+  let heartbeatHandle = null;
   let settled = false;
   let runStartTime = 0;
   let doneSent = false;
   const IDLE_GRACE_MS = 20;
 
+  function pendingTimerCount() {
+    return pendingTimeouts.size + pendingIntervals.size;
+  }
+
   function notifyActivity() {
-    // Each console message or timer scheduling resets the idle timer.
-    if (idleCheckHandle) clearTimeout(idleCheckHandle);
-    if (settled && pendingTimers === 0 && pendingInputs.size === 0 && !doneSent) {
-      idleCheckHandle = setTimeout(maybeFinish, IDLE_GRACE_MS);
+    if (idleCheckHandle) nativeClearTimeout(idleCheckHandle);
+    if (settled && pendingTimerCount() === 0 && pendingInputs.size === 0 && !doneSent) {
+      idleCheckHandle = nativeSetTimeout(maybeFinish, IDLE_GRACE_MS);
     }
+  }
+
+  function startHeartbeat() {
+    if (heartbeatHandle) nativeClearInterval(heartbeatHandle);
+    heartbeatHandle = nativeSetInterval(() => {
+      if (!doneSent) postMessageToHost({ type: 'activity', token: currentToken });
+    }, 1000);
   }
 
   function wrapSetTimeout(fn, ms) {
     const extra = Array.prototype.slice.call(arguments, 2);
-    pendingTimers++;
-    const id = self.setTimeout(function () {
-      pendingTimers = Math.max(0, pendingTimers - 1);
+    let id;
+    id = nativeSetTimeout(function () {
+      pendingTimeouts.delete(id);
       try {
-        fn.apply(this, arguments);
+        if (typeof fn === 'function') fn.apply(this, arguments);
+        else throw new TypeError('setTimeout callback must be a function');
       } catch (err) {
         reportError(err);
       }
       notifyActivity();
-    }, ms, ...extra);
+    }, Number(ms) || 0, ...extra);
+    pendingTimeouts.add(id);
     notifyActivity();
     return id;
   }
 
   function wrapSetInterval(fn, ms) {
     const extra = Array.prototype.slice.call(arguments, 2);
-    // Intervals remain pending until cleared; we count them once.
-    pendingTimers++;
-    const id = self.setInterval(function () {
+    let id;
+    id = nativeSetInterval(function () {
       try {
-        fn.apply(this, arguments);
+        if (typeof fn === 'function') fn.apply(this, arguments);
+        else throw new TypeError('setInterval callback must be a function');
       } catch (err) {
         reportError(err);
       }
       notifyActivity();
-    }, ms, ...extra);
+    }, Number(ms) || 0, ...extra);
+    pendingIntervals.add(id);
     notifyActivity();
     return id;
   }
 
   function wrapClearTimeout(id) {
-    // We don't know whether it was a timeout or interval — clear both
-    // and optimistically decrement the counter once (we may briefly
-    // under-count but that's safe because notifyActivity re-checks).
-    self.clearTimeout(id);
-    self.clearInterval(id);
-    if (pendingTimers > 0) pendingTimers--;
-    notifyActivity();
+    nativeClearTimeout(id);
+    if (pendingTimeouts.delete(id)) notifyActivity();
   }
 
   function wrapClearInterval(id) {
-    self.clearInterval(id);
-    if (pendingTimers > 0) pendingTimers--;
-    notifyActivity();
+    nativeClearInterval(id);
+    if (pendingIntervals.delete(id)) notifyActivity();
   }
 
   function reportError(err) {
@@ -284,9 +317,10 @@
   function maybeFinish() {
     if (doneSent) return;
     if (!settled) return;
-    if (pendingTimers > 0 || pendingInputs.size > 0) return;
+    if (pendingTimerCount() > 0 || pendingInputs.size > 0) return;
     doneSent = true;
-    if (idleCheckHandle) { clearTimeout(idleCheckHandle); idleCheckHandle = null; }
+    if (idleCheckHandle) { nativeClearTimeout(idleCheckHandle); idleCheckHandle = null; }
+    if (heartbeatHandle) { nativeClearInterval(heartbeatHandle); heartbeatHandle = null; }
     const end = (typeof performance !== 'undefined' ? performance.now() : Date.now());
     postMessageToHost({ type: 'done', token: currentToken, executionTime: end - runStartTime });
   }
@@ -296,12 +330,15 @@
    * ---------------------------------------------------------------- */
   function runCode(code, token) {
     currentToken = token;
-    pendingTimers = 0;
+    consoleGroupDepth = 0;
+    pendingTimeouts.clear();
+    pendingIntervals.clear();
     pendingInputs.clear();
     settled = false;
     doneSent = false;
     runStartTime = (typeof performance !== 'undefined' ? performance.now() : Date.now());
-    if (idleCheckHandle) { clearTimeout(idleCheckHandle); idleCheckHandle = null; }
+    if (idleCheckHandle) { nativeClearTimeout(idleCheckHandle); idleCheckHandle = null; }
+    startHeartbeat();
 
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     let fn;
@@ -314,6 +351,10 @@
         'setInterval', 'clearInterval',
         'atob', 'btoa', 'URL', 'URLSearchParams',
         'alert', 'confirm', 'prompt', '__jspPrompt',
+        'self', 'globalThis', 'window', 'parent', 'top', 'frames', 'opener',
+        'location', 'navigator', 'document',
+        'localStorage', 'sessionStorage', 'indexedDB', 'caches',
+        'postMessage', 'close', 'importScripts',
         prepareCode(code)
       );
     } catch (syntaxErr) {
@@ -336,7 +377,11 @@
         self.atob ? self.atob.bind(self) : atob,
         self.btoa ? self.btoa.bind(self) : btoa,
         self.URL, self.URLSearchParams,
-        noopAlert, noopConfirm, noopPrompt, requestInput
+        noopAlert, noopConfirm, noopPrompt, requestInput,
+        Object.freeze({ console: sandboxConsole }), Object.freeze({ console: sandboxConsole }),
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined, undefined, undefined, undefined,
+        undefined, undefined, undefined
       );
     } catch (syncErr) {
       reportError(syncErr);
@@ -357,12 +402,8 @@
       }
     );
 
-    // In case the user's code schedules zero timers and returns a
-    // non-thenable, set a safety microtask-ish check to flush shortly.
-    setTimeout(() => {
-      if (!settled) { settled = true; }
-      notifyActivity();
-    }, 0);
+    // AsyncFunction always returns a Promise. Its settlement handler above is
+    // the authoritative completion signal, including fetch and custom promises.
   }
 
   /* ----------------------------------------------------------------

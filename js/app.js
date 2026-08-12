@@ -15,8 +15,9 @@
     document.body.classList.toggle('theme-dark', State.settings.theme === 'dark');
     document.body.classList.toggle('theme-light', State.settings.theme === 'light');
 
-    // Sidebar visibility.
-    if (!State.settings.sidebarVisible) {
+    // Sidebar visibility. On phones the Explorer is an on-demand drawer and
+    // starts closed without changing the user's remembered desktop layout.
+    if (!State.settings.sidebarVisible || window.innerWidth <= 768) {
       document.querySelector('.app-main').classList.add('sidebar-hidden');
     }
 

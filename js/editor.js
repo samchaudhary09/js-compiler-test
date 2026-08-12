@@ -129,49 +129,11 @@
         allowSyntheticDefaultImports: true,
         strict: false,
         noEmit: true,
-        lib: ['esnext', 'dom', 'dom.iterable', 'webworker']
+        lib: ['esnext', 'dom', 'dom.iterable']
       });
 
-      // Expose a small ambient declaration file so common globals resolve in IntelliSense.
-      const libSource = [
-        'declare const console: {',
-        '  log(...data: any[]): void;',
-        '  info(...data: any[]): void;',
-        '  warn(...data: any[]): void;',
-        '  error(...data: any[]): void;',
-        '  debug(...data: any[]): void;',
-        '  table(...data: any[]): void;',
-        '  clear(): void;',
-        '  time(label?: string): void;',
-        '  timeEnd(label?: string): void;',
-        '  dir(item?: any, options?: any): void;',
-        '  group(...label: any[]): void;',
-        '  groupEnd(): void;',
-        '  count(label?: string): void;',
-        '  countReset(label?: string): void;',
-        '  trace(...data: any[]): void;',
-        '  assert(condition?: boolean, ...data: any[]): void;',
-        '};',
-        'declare function setTimeout(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;',
-        'declare function clearTimeout(handle?: number): void;',
-        'declare function setInterval(handler: (...args: any[]) => void, timeout?: number, ...args: any[]): number;',
-        'declare function clearInterval(handle?: number): void;',
-        'declare function setImmediate(handler: (...args: any[]) => void, ...args: any[]): any;',
-        'declare function clearImmediate(handle: any): void;',
-        'declare function fetch(input: any, init?: any): Promise<any>;',
-        'declare const window: any;',
-        'declare const self: any;',
-        'declare const globalThis: any;',
-        'declare const process: { env: { [key: string]: string | undefined }; exit(code?: number): void; };',
-        'declare function alert(message?: any): void;',
-        'declare function prompt(message?: string, _default?: string): string | null;',
-        'declare function confirm(message?: string): boolean;',
-        'declare function atob(data: string): string;',
-        'declare function btoa(data: string): string;',
-        'declare class URL { constructor(url: string, base?: string); href: string; }',
-        'declare class URLSearchParams { constructor(init?: any); append(name: string, value: string): void; toString(): string; }'
-      ].join('\n');
-      monaco.languages.typescript.javascriptDefaults.addExtraLib(libSource, 'ts:playground-ambient.d.ts');
+      // ESNext and DOM libraries already provide console, timers, prompt,
+      // fetch, Math, and other browser APIs without conflicting duplicate globals.
 
       // Richer word-based suggestions (so "con" suggests "console", "const", "continue",
       // plus identifiers already used in the file).
@@ -296,12 +258,14 @@
       if (!chord) return null;
       const monaco = this.monaco;
       if (!monaco) return null;
+      if (chord.includes('>')) return null;
       const parts = chord.split('+');
+      const mac = JSP.KeyBindings && JSP.KeyBindings.detectPlatform && JSP.KeyBindings.detectPlatform() === 'mac';
       let mods = 0;
       let key = null;
       for (const p of parts) {
-        if (p === 'ctrl') mods |= monaco.KeyMod.CtrlCmd;
-        else if (p === 'meta') mods |= monaco.KeyMod.WinCtrl;
+        if (p === 'ctrl') mods |= mac ? monaco.KeyMod.WinCtrl : monaco.KeyMod.CtrlCmd;
+        else if (p === 'meta') mods |= mac ? monaco.KeyMod.CtrlCmd : monaco.KeyMod.WinCtrl;
         else if (p === 'shift') mods |= monaco.KeyMod.Shift;
         else if (p === 'alt') mods |= monaco.KeyMod.Alt;
         else key = p;
@@ -392,7 +356,7 @@
         JSP.UI.updateTabDirtyState(file.id);
         // Auto-save (debounced in UI/state layer).
         if (State.settings.autoSave) {
-          JSP.Commands.scheduleAutoSave();
+          JSP.Commands.scheduleAutoSave(file.id);
         } else {
           JSP.UI.updateSaveStatus('unsaved');
         }
@@ -427,6 +391,7 @@
           JSP.UI.renderFileTree();
           JSP.UI.updateBreadcrumb();
         }
+        if (JSP.Commands && State.ready) JSP.Commands.persistState();
         this._updateFallbackCursor(this._fallbackTextarea);
         this._fallbackTextarea.focus();
         return;
@@ -451,6 +416,7 @@
       JSP.UI.renderTabs();
       JSP.UI.renderFileTree();
       JSP.UI.updateBreadcrumb();
+      if (JSP.Commands && State.ready) JSP.Commands.persistState();
       this._updateCursorStatus();
       this.editor.focus();
     },
@@ -615,13 +581,16 @@
           if (JSP.UI && JSP.UI.updateTabDirtyState) JSP.UI.updateTabDirtyState(f.id);
           if (JSP.UI && JSP.UI.renderOutline) JSP.UI.renderOutline();
         }
-        if (State.settings.autoSave && JSP.Commands) JSP.Commands.scheduleAutoSave();
+        if (State.settings.autoSave && JSP.Commands) JSP.Commands.scheduleAutoSave(f && f.id);
         else if (JSP.UI) JSP.UI.updateSaveStatus('unsaved');
       });
       ta.addEventListener('keydown', (e) => {
         if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
           e.preventDefault();
-          if (JSP.Commands) JSP.Commands.run('shortcut');
+          if (JSP.Commands) {
+            if (e.shiftKey && JSP.Commands.runSelection) JSP.Commands.runSelection('shortcut');
+            else JSP.Commands.run('shortcut');
+          }
         } else if (e.key === 'Tab') {
           e.preventDefault();
           const start = ta.selectionStart;
