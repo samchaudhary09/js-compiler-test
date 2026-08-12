@@ -1,0 +1,118 @@
+/* ============ variables.css ============ */
+:root {
+  /* Dark theme (default) */
+  --bg: #1e1e1e;
+  --bg-header: #323233;
+  --bg-sidebar: #252526;
+  --bg-editor: #1e1e1e;
+  --bg-console: #181818;
+  --bg-tab: #2d2d2d;
+  --bg-tab-active: #1e1e1e;
+  --bg-tab-hover: #3a3a3a;
+  --bg-statusbar: #007acc;
+  --bg-input: #3c3c3c;
+  --bg-hover: #2a2d2e;
+  --bg-selected: #094771;
+  --bg-active: #04395e;
+  --bg-tooltip: #252526;
+  --bg-modal: #252526;
+  --bg-dropdown: #252526;
+  --bg-overlay: rgba(0, 0, 0, 0.5);
+
+  --text: #cccccc;
+  --text-dim: #9d9d9d;
+  --text-faint: #6e6e6e;
+  --text-bright: #ffffff;
+  --text-active: #ffffff;
+
+  --border: #3c3c3c;
+  --border-light: #2b2b2b;
+  --focus-ring: #007acc;
+
+  --accent: #007acc;
+  --accent-hover: #1c8fd6;
+  --accent-text: #ffffff;
+
+  --log-info: #4fc1ff;
+  --log-warn: #d7ba7d;
+  --log-error: #f48771;
+  --log-success: #89d185;
+  --log-debug: #c586c0;
+
+  --file-js: #f7df1e;
+  --file-folder: #dcb67a;
+  --file-folder-open: #e8c88a;
+
+  --danger: #f48771;
+  --danger-hover: #f4a495;
+
+  --sidebar-width: 250px;
+  --header-height: 50px;
+  --statusbar-height: 24px;
+  --tabs-height: 38px;
+  --breadcrumb-height: 24px;
+  --console-min-height: 140px;
+  --console-default-height: 280px;
+  --console-default-width: 420px;
+  --panel-size: 420px;
+
+  --font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", Consolas, "Courier New", monospace;
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, sans-serif;
+
+  --radius-sm: 3px;
+  --radius: 6px;
+  --shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.theme-light {
+  --bg: #ffffff;
+  --bg-header: #f3f3f3;
+  --bg-sidebar: #f3f3f3;
+  --bg-editor: #ffffff;
+  --bg-console: #f8f8f8;
+  --bg-tab: #ececec;
+  --bg-tab-active: #ffffff;
+  --bg-tab-hover: #e0e0e0;
+  --bg-statusbar: #007acc;
+  --bg-input: #ffffff;
+  --bg-hover: #e8e8e8;
+  --bg-selected: #cce4f7;
+  --bg-active: #cce4f7;
+  --bg-tooltip: #fffffe;
+  --bg-modal: #f3f3f3;
+  --bg-dropdown: #fffffe;
+  --bg-overlay: rgba(0, 0, 0, 0.3);
+
+  --text: #333333;
+  --text-dim: #6c6c6c;
+  --text-faint: #999999;
+  --text-bright: #000000;
+  --text-active: #000000;
+
+  --border: #d4d4d4;
+  --border-light: #e0e0e0;
+  --focus-ring: #007acc;
+
+  --log-info: #1a7fb8;
+  --log-warn: #9a6a00;
+  --log-error: #d03838;
+  --log-success: #1b7a2e;
+  --log-debug: #8b3a91;
+
+  --file-js: #c7a000;
+  --file-folder: #b08040;
+  --file-folder-open: #c89050;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--accent);
+  color: #fff;
+  padding: 8px 16px;
+  z-index: 10000;
+}
+.skip-link:focus {
+  left: 0;
+}
