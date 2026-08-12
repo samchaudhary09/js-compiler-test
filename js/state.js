@@ -7,15 +7,21 @@
   const DEFAULT_SETTINGS = {
     theme: 'dark',
     fontSize: 15,
+    fontFamily: 'JetBrains Mono',
     tabSize: 2,
     wordWrap: false,
     minimap: true,
+    ligatures: true,
+    lineNumbers: true,
     autoSave: true,
+    confirmClose: true,
+    restoreTabs: true,
     sidebarVisible: true,
-    /** 'bottom' | 'right' — where the console/problems panel is docked. */
-    panelPosition: 'right',
-    panelHeight: 260,
-    panelWidth: 380,
+    /** 'bottom' | 'right' | 'hidden' — where the console/problems panel is docked. */
+    panelPosition: 'bottom',
+    panelHeight: 280,
+    panelWidth: 420,
+    explorerWidth: 252,
     /** User-customized keybindings: action id -> chord string (e.g. "ctrl+shift+p"). */
     keybindings: {}
   };
@@ -152,7 +158,7 @@
    * Central application state.
    */
   const State = {
-    version: 2,
+    version: 3,
 
     settings: Object.assign({}, DEFAULT_SETTINGS),
 
@@ -160,6 +166,12 @@
     files: new Map(),
     openTabs: [],
     activeFileId: null,
+    /** Latest live Monaco diagnostics; Editor is the single source of truth. */
+    diagnostics: [],
+    /** Small, local-only execution log (newest first). */
+    runHistory: [],
+    outputMessages: [],
+    activePanel: 'console',
 
     editor: null,
     models: new Map(),
@@ -185,6 +197,8 @@
       this.files = new Map();
       this.openTabs = [];
       this.activeFileId = null;
+      this.diagnostics = [];
+      this.outputMessages = [];
       this.indexFiles();
       const main = this.findFileByName('main.js');
       if (main) {

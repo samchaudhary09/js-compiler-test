@@ -114,7 +114,7 @@
       if (this._useLocalStorage) {
         try {
           Object.keys(localStorage)
-            .filter((k) => k === SETTINGS_KEY || k === 'jsp.project' || k === 'jsp.state')
+            .filter((k) => k === SETTINGS_KEY || k === 'jsp.project' || k === 'jsp.state' || k === 'jsp.run-history' || k === 'jsp.output-messages')
             .forEach((k) => localStorage.removeItem(k));
         } catch (_) {}
         return;

@@ -58,7 +58,7 @@ JS Playground is a static, fully-client-side coding playground that feels like a
 - Quick Open file search (`Ctrl/Cmd+P`)
 - Sidebar toggle (`Ctrl/Cmd+B`)
 - Settings panel
-- Dark and Light themes (with matching Monaco themes)
+- Dark, Light, and High Contrast themes (with matching Monaco themes)
 - Status bar showing language, encoding, indentation, cursor position, save state
 - Problems panel listing Monaco diagnostics across all files
 - Toast notifications
@@ -100,6 +100,7 @@ js-playground/
 │   ├── variables.css       # Design tokens (dark/light themes)
 │   ├── layout.css          # Grid/flex layout of header/sidebar/editor/console/statusbar
 │   ├── components.css      # Buttons, menus, dialogs, toasts, tabs...
+│   ├── upgrade.css         # Product polish and new workbench surfaces
 │   └── responsive.css      # Media queries
 ├── js/
 │   ├── app.js              # Bootstrap / startup
@@ -111,6 +112,7 @@ js-playground/
 │   ├── ui.js               # DOM rendering (tree, tabs, console, menus, dialogs)
 │   ├── commands.js         # All user commands + persistence orchestration
 │   ├── shortcuts.js        # Global keyboard shortcuts
+│   ├── upgrade.js          # Layered IDE productivity, learning, panel, and preview features
 │   └── utils.js            # Helpers (debounce, uniqueId, formatValue, ...)
 ├── workers/
 │   └── javascript-worker.js # Sandboxed JS runtime
@@ -172,8 +174,11 @@ repository subdirectory.
 | --- | --- |
 | Run code | `Ctrl/Cmd + Enter` |
 | Save | `Ctrl/Cmd + S` |
+| Save All | `Ctrl/Cmd + Alt + S` |
+| Run Selection | `Ctrl/Cmd + Shift + Enter` |
 | Command Palette | `Ctrl/Cmd + Shift + P` |
 | Quick Open | `Ctrl/Cmd + P` |
+| Search Project | `Ctrl/Cmd + Shift + F` |
 | Toggle Sidebar | `Ctrl/Cmd + B` |
 | New File | `Ctrl/Cmd + N` |
 | Close File | `Ctrl/Cmd + W` |
@@ -236,3 +241,26 @@ and/or its affiliates; this project is an independent tool.
 ## 📄 License
 
 MIT — see [LICENSE](./LICENSE).
+
+## Product upgrade notes
+
+The current workbench keeps the original static architecture and adds a compact
+learning-focused IDE layer:
+
+- Four bottom-panel views: Console, live Monaco Problems, Output, and an
+  isolated sandboxed Preview iframe.
+- Run File and Run Selection (`Ctrl/Cmd+Shift+Enter`) with the same dedicated
+  Web Worker and five-second watchdog.
+- Expandable object/array output, responsive `console.table`, `console.time`,
+  and a custom worker-to-IDE `prompt()` input dialog.
+- Quick Open, project-wide search (`Ctrl/Cmd+Shift+F`), Command Palette,
+  Outline, breadcrumbs, snippets, duplicate/drag files, and tab actions.
+- Local practice exercises and bounded run history, persisted alongside the
+  existing IndexedDB/localStorage project data.
+- Dark, Light, and High Contrast themes plus editor font, ligature, line
+  number, panel, Explorer sizing, and restore-tab preferences.
+
+All new UI surfaces use safe DOM text APIs for user values. Preview code runs
+in an iframe with `sandbox="allow-scripts"`; it does not share the application
+DOM or storage. Project ZIP imports reject absolute/traversal paths and enforce
+entry and size limits.

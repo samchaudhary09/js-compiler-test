@@ -8,6 +8,8 @@
   const postMessageToHost = self.postMessage.bind(self);
 
   let currentToken = 0;
+  let inputRequestId = 0;
+  const pendingInputs = new Map();
 
   /* ----------------------------------------------------------------
    * Value serialization (structured clone doesn't carry rich types
@@ -55,13 +57,13 @@
     }
   }
 
-  function sendConsole(level, args) {
+  function sendConsole(level, args, meta) {
     try {
       const serialized = args.map((a) => {
         try { return serialize(a); }
         catch (_) { return { type: 'string', value: String(a) }; }
       });
-      postMessageToHost({ type: 'console', level: level, args: serialized, token: currentToken });
+      postMessageToHost({ type: 'console', level: level, args: serialized, table: !!(meta && meta.table), token: currentToken });
     } catch (e) {
       postMessageToHost({ type: 'console', level: 'error', args: [{ type: 'string', value: 'Failed to serialize console output: ' + e.message }], token: currentToken });
     }
@@ -80,7 +82,7 @@
     warn: function () { sendConsole('warn', Array.prototype.slice.call(arguments)); },
     error: function () { sendConsole('error', Array.prototype.slice.call(arguments)); },
     debug: function () { sendConsole('debug', Array.prototype.slice.call(arguments)); },
-    table: function () { sendConsole('log', Array.prototype.slice.call(arguments)); },
+    table: function () { sendConsole('log', Array.prototype.slice.call(arguments), { table: true }); },
     dir: function () { sendConsole('log', Array.prototype.slice.call(arguments)); },
     group: function () { sendConsole('log', Array.prototype.slice.call(arguments)); },
     groupEnd: function () {},
@@ -117,6 +119,67 @@
       sendConsole('log', Array.prototype.slice.call(arguments).concat([(err.stack || '').split('\n').slice(2).join('\n')]));
     }
   };
+
+  /* ----------------------------------------------------------------
+   * IDE input bridge. A worker cannot call the native prompt without
+   * freezing the host, so prompt calls are rewritten to await this promise.
+   * The normal learning example `const name = prompt(...)` therefore still
+   * behaves as expected inside the async runner.
+   * ---------------------------------------------------------------- */
+  function requestInput(message, defaultValue) {
+    const requestId = ++inputRequestId;
+    postMessageToHost({
+      type: 'input',
+      token: currentToken,
+      requestId: requestId,
+      message: message == null ? '' : String(message),
+      defaultValue: defaultValue == null ? '' : String(defaultValue)
+    });
+    notifyActivity();
+    return new Promise((resolve) => pendingInputs.set(requestId, resolve));
+  }
+
+  function prepareCode(code) {
+    // Rewrite bare prompt calls outside strings/comments. The worker runner
+    // is already async, so the familiar synchronous-looking example can
+    // safely suspend while the IDE input dialog is open.
+    const source = String(code || '');
+    let out = '';
+    let quote = null;
+    let lineComment = false;
+    let blockComment = false;
+    for (let i = 0; i < source.length; i++) {
+      const ch = source[i];
+      const next = source[i + 1];
+      if (lineComment) {
+        out += ch;
+        if (ch === '\n') lineComment = false;
+        continue;
+      }
+      if (blockComment) {
+        out += ch;
+        if (ch === '*' && next === '/') { out += next; i++; blockComment = false; }
+        continue;
+      }
+      if (quote) {
+        out += ch;
+        if (ch === '\\' && i + 1 < source.length) { out += source[++i]; continue; }
+        if (ch === quote) quote = null;
+        continue;
+      }
+      if ((ch === '"' || ch === "'" || ch === '`')) { quote = ch; out += ch; continue; }
+      if (ch === '/' && next === '/') { out += ch + next; i++; lineComment = true; continue; }
+      if (ch === '/' && next === '*') { out += ch + next; i++; blockComment = true; continue; }
+      if (source.slice(i, i + 6) === 'prompt' && !/[\w$.]/.test(source[i - 1] || '') && /^prompt\s*\(/.test(source.slice(i))) {
+        const match = /^prompt\s*\(/.exec(source.slice(i))[0];
+        out += 'await __jspPrompt(';
+        i += match.length - 1;
+        continue;
+      }
+      out += ch;
+    }
+    return out;
+  }
 
   /* ----------------------------------------------------------------
    * Error normalization
@@ -161,7 +224,7 @@
   function notifyActivity() {
     // Each console message or timer scheduling resets the idle timer.
     if (idleCheckHandle) clearTimeout(idleCheckHandle);
-    if (settled && pendingTimers === 0 && !doneSent) {
+    if (settled && pendingTimers === 0 && pendingInputs.size === 0 && !doneSent) {
       idleCheckHandle = setTimeout(maybeFinish, IDLE_GRACE_MS);
     }
   }
@@ -221,7 +284,7 @@
   function maybeFinish() {
     if (doneSent) return;
     if (!settled) return;
-    if (pendingTimers > 0) return;
+    if (pendingTimers > 0 || pendingInputs.size > 0) return;
     doneSent = true;
     if (idleCheckHandle) { clearTimeout(idleCheckHandle); idleCheckHandle = null; }
     const end = (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -234,6 +297,7 @@
   function runCode(code, token) {
     currentToken = token;
     pendingTimers = 0;
+    pendingInputs.clear();
     settled = false;
     doneSent = false;
     runStartTime = (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -249,8 +313,8 @@
         'setTimeout', 'clearTimeout',
         'setInterval', 'clearInterval',
         'atob', 'btoa', 'URL', 'URLSearchParams',
-        'alert', 'confirm', 'prompt',
-        code
+        'alert', 'confirm', 'prompt', '__jspPrompt',
+        prepareCode(code)
       );
     } catch (syntaxErr) {
       postMessageToHost({ type: 'error', token: token, error: buildErrorObject(syntaxErr, syntaxErr.lineNumber) });
@@ -272,7 +336,7 @@
         self.atob ? self.atob.bind(self) : atob,
         self.btoa ? self.btoa.bind(self) : btoa,
         self.URL, self.URLSearchParams,
-        noopAlert, noopConfirm, noopPrompt
+        noopAlert, noopConfirm, noopPrompt, requestInput
       );
     } catch (syncErr) {
       reportError(syncErr);
@@ -341,6 +405,13 @@
     if (!msg) return;
     if (msg.type === 'run') {
       runCode(String(msg.code || ''), msg.token);
+    } else if (msg.type === 'input-response') {
+      const resolve = pendingInputs.get(msg.requestId);
+      if (resolve) {
+        pendingInputs.delete(msg.requestId);
+        resolve(msg.value == null ? null : String(msg.value));
+        notifyActivity();
+      }
     } else if (msg.type === 'ping') {
       postMessageToHost({ type: 'pong', token: currentToken });
     }

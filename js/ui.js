@@ -666,7 +666,7 @@
       let startY = 0, startH = 0;
       const onMoveH = (e) => {
         const dy = startY - e.clientY;
-        const maxH = Math.max(120, window.innerHeight * 0.7);
+        const maxH = Math.max(120, window.innerHeight * 0.6);
         const newH = Math.max(120, Math.min(maxH, startH + dy));
         State.settings.panelHeight = newH;
         State.settings.consoleHeight = newH;

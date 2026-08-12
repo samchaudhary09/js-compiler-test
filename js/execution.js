@@ -22,6 +22,7 @@
     "  'use strict';",
     '  var postMessageToHost = self.postMessage.bind(self);',
     '  var currentToken = 0;',
+    '  var inputRequestId = 0, pendingInputs = new Map();',
     '  function serialize(value, seen) {',
     '    seen = seen || [];',
     '    var t = typeof value;',
@@ -49,13 +50,13 @@
     '      return { type: "object", value: String(value) };',
     '    }',
     '  }',
-    '  function sendConsole(level, args) {',
+    '  function sendConsole(level, args, meta) {',
     '    var serialized = [];',
     '    for (var i = 0; i < args.length; i++) {',
     '      try { serialized.push(serialize(args[i])); }',
     '      catch (e) { serialized.push({ type: "string", value: String(args[i]) }); }',
     '    }',
-    '    postMessageToHost({ type: "console", level: level, args: serialized, token: currentToken });',
+    '    postMessageToHost({ type: "console", level: level, args: serialized, table: !!(meta && meta.table), token: currentToken });',
     '    notifyActivity();',
     '  }',
     '  var timers = Object.create(null);',
@@ -66,7 +67,7 @@
     '    warn: function () { sendConsole("warn", Array.prototype.slice.call(arguments)); },',
     '    error: function () { sendConsole("error", Array.prototype.slice.call(arguments)); },',
     '    debug: function () { sendConsole("debug", Array.prototype.slice.call(arguments)); },',
-    '    table: function () { sendConsole("log", Array.prototype.slice.call(arguments)); },',
+    '    table: function () { sendConsole("log", Array.prototype.slice.call(arguments), { table: true }); },',
     '    dir: function () { sendConsole("log", Array.prototype.slice.call(arguments)); },',
     '    group: function () { sendConsole("log", Array.prototype.slice.call(arguments)); },',
     '    groupEnd: function () {},',
@@ -88,10 +89,17 @@
     '    trace: function () { sendConsole("log", Array.prototype.slice.call(arguments)); }',
     '  };',
     '  var pendingTimers = 0, idleCheckHandle = null, settled = false, runStartTime = 0, doneSent = false;',
+    '  function requestInput(message, defaultValue) {',
+    '    var requestId = ++inputRequestId;',
+    '    postMessageToHost({ type: "input", token: currentToken, requestId: requestId, message: message == null ? "" : String(message), defaultValue: defaultValue == null ? "" : String(defaultValue) });',
+    '    notifyActivity();',
+    '    return new Promise(function (resolve) { pendingInputs.set(requestId, resolve); });',
+    '  }',
+    '  function prepareCode(code) { return String(code || \"\").replace(/(^|[^\\w$.])prompt\\s*\\(/g, \"$1await __jspPrompt(\"); }',
     '  var IDLE_GRACE_MS = 20;',
     '  function notifyActivity() {',
     '    if (idleCheckHandle) clearTimeout(idleCheckHandle);',
-    '    if (settled && pendingTimers === 0 && !doneSent) idleCheckHandle = setTimeout(maybeFinish, IDLE_GRACE_MS);',
+    '    if (settled && pendingTimers === 0 && pendingInputs.size === 0 && !doneSent) idleCheckHandle = setTimeout(maybeFinish, IDLE_GRACE_MS);',
     '  }',
     '  function wrapSetTimeout(fn, ms) {',
     '    var extra = Array.prototype.slice.call(arguments, 2);',
@@ -123,20 +131,20 @@
     '    }});',
     '  }',
     '  function maybeFinish() {',
-    '    if (doneSent || !settled || pendingTimers > 0) return;',
+    '    if (doneSent || !settled || pendingTimers > 0 || pendingInputs.size > 0) return;',
     '    doneSent = true;',
     '    if (idleCheckHandle) { clearTimeout(idleCheckHandle); idleCheckHandle = null; }',
     '    var end = (typeof performance !== "undefined" ? performance.now() : Date.now());',
     '    postMessageToHost({ type: "done", token: currentToken, executionTime: end - runStartTime });',
     '  }',
     '  function runCode(code, token) {',
-    '    currentToken = token; pendingTimers = 0; settled = false; doneSent = false;',
+    '    currentToken = token; pendingTimers = 0; pendingInputs.clear(); settled = false; doneSent = false;',
     '    runStartTime = (typeof performance !== "undefined" ? performance.now() : Date.now());',
     '    if (idleCheckHandle) { clearTimeout(idleCheckHandle); idleCheckHandle = null; }',
     '    var AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;',
     '    var fn;',
     '    try {',
-    '      fn = new AsyncFunction("console","setTimeout","clearTimeout","setInterval","clearInterval","atob","btoa","URL","URLSearchParams","alert","confirm","prompt", code);',
+    '      fn = new AsyncFunction("console","setTimeout","clearTimeout","setInterval","clearInterval","atob","btoa","URL","URLSearchParams","alert","confirm","prompt","__jspPrompt", prepareCode(code));',
     '    } catch (syntaxErr) {',
     '      reportError(syntaxErr); settled = true; maybeFinish(); return;',
     '    }',
@@ -144,7 +152,7 @@
     '    try {',
     '      var result = fn(sandboxConsole, wrapSetTimeout, wrapClearTimeout, wrapSetInterval, wrapClearInterval,',
     '        self.atob && self.atob.bind(self), self.btoa && self.btoa.bind(self),',
-    '        self.URL, self.URLSearchParams, noopAlert, function () { return false; }, function () { return null; });',
+    '        self.URL, self.URLSearchParams, noopAlert, function () { return false; }, function () { return null; }, requestInput);',
     '      Promise.resolve(result).then(function () { settled = true; notifyActivity(); }, function (err) { reportError(err); settled = true; notifyActivity(); });',
     '    } catch (syncErr) {',
     '      reportError(syncErr); settled = true; notifyActivity();',
@@ -154,6 +162,7 @@
     '  self.addEventListener("message", function (event) {',
     '    var msg = event.data; if (!msg) return;',
     '    if (msg.type === "run") runCode(String(msg.code || ""), msg.token);',
+    '    else if (msg.type === "input-response") { var resolve = pendingInputs.get(msg.requestId); if (resolve) { pendingInputs.delete(msg.requestId); resolve(msg.value == null ? null : String(msg.value)); notifyActivity(); } }',
     '    else if (msg.type === "ping") postMessageToHost({ type: "pong", token: currentToken });',
     '  });',
     '})(self);'
@@ -317,8 +326,17 @@
       switch (msg.type) {
         case 'console': {
           const args = (msg.args || []).map((a) => deserialize(a));
-          u.appendConsole(msg.level, args);
+          u.appendConsole(msg.level, args, { table: !!msg.table });
           this._resetWatchdog();
+          break;
+        }
+        case 'input': {
+          this._waitingForInput = true;
+          if (this._timeoutHandle) { clearTimeout(this._timeoutHandle); this._timeoutHandle = null; }
+          const request = u.requestInput ? u.requestInput(msg.message, msg.defaultValue) : Promise.resolve(null);
+          Promise.resolve(request).then((value) => {
+            if (this._worker && State.running) this.respondInput(msg.requestId, value);
+          });
           break;
         }
         case 'clear':
@@ -333,6 +351,15 @@
         case 'pong':
           break;
       }
+    },
+
+    respondInput(requestId, value) {
+      if (!this._worker) return;
+      this._waitingForInput = false;
+      try {
+        this._worker.postMessage({ type: 'input-response', requestId: requestId, value: value == null ? null : String(value), token: this._currentToken });
+      } catch (_) {}
+      this._resetWatchdog();
     },
 
     _handleWorkerError(e) {
@@ -363,6 +390,7 @@
     /** Reset the inactivity timeout. Prevents killing async code that uses setTimeout/Promises. */
     _resetWatchdog() {
       if (this._timeoutHandle) clearTimeout(this._timeoutHandle);
+      if (this._waitingForInput) return;
       this._timeoutHandle = setTimeout(() => {
         if (State.running) {
           const u = ui();
@@ -386,6 +414,7 @@
       }
 
       const code = source == null ? '' : String(source);
+      this._waitingForInput = false;
       this._lastCode = code;
 
       if (!this._spawnWorker()) {
@@ -436,14 +465,18 @@
     stop(reason) {
       if (!State.running) return;
       this._terminateWorker();
+      this._waitingForInput = false;
       State.running = false;
       const u = ui();
       if (u) {
+        if (u.cancelInput) u.cancelInput();
         u.setRunning(false);
         if (reason === 'user') {
           u.appendConsole('warn', 'Execution stopped by user.');
+          if (u.appendOutput) u.appendOutput('Execution stopped', 'system');
         } else if (reason === 'timeout') {
           u.appendConsole('error', 'The worker was terminated due to the execution timeout.');
+          if (u.appendOutput) u.appendOutput('Execution stopped after the timeout limit', 'error');
         }
         const elapsed = (typeof performance !== 'undefined' ? performance.now() : Date.now()) - this._startTime;
         if (u.updateExecStatus) {
@@ -463,9 +496,15 @@
       const t = typeof executionTime === 'number' ? executionTime : 0;
       const dur = (Utils && Utils.formatDuration) ? Utils.formatDuration(t) : Math.round(t) + 'ms';
       if (!aborted) {
-        u.appendConsole('success', 'Executed in ' + dur + ' (browser timing, not a benchmark).');
+        if (State._activeRunHadError) {
+          u.appendConsole('error', 'Execution failed.');
+          if (u.appendOutput) u.appendOutput('Execution failed', 'error');
+        } else {
+          u.appendConsole('success', 'Executed in ' + dur + ' (browser timing, not a benchmark).');
+          if (u.appendOutput) u.appendOutput('Executed in ' + dur, 'success');
+        }
       }
-      if (u.updateExecStatus) u.updateExecStatus(aborted ? 'Aborted' : 'Done in ' + dur);
+      if (u.updateExecStatus) u.updateExecStatus(aborted ? 'Aborted' : State._activeRunHadError ? 'Failed' : 'Done in ' + dur);
     }
   };
 
