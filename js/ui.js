@@ -19,13 +19,14 @@
 
     init() {
       this.cacheDom();
-      this.bindGlobalEvents();
-      this.bindHeaderActions();
-      this.bindSidebarActions();
-      this.bindConsoleActions();
-      this.bindSettings();
-      this.bindOverlays();
-      this.applyTheme();
+      // Bind Run first so a later init error can never leave the button dead.
+      try { this.bindHeaderActions(); } catch (e) { console.error('bindHeaderActions failed', e); }
+      try { this.bindGlobalEvents(); } catch (e) { console.error('bindGlobalEvents failed', e); }
+      try { this.bindSidebarActions(); } catch (e) { console.error('bindSidebarActions failed', e); }
+      try { this.bindConsoleActions(); } catch (e) { console.error('bindConsoleActions failed', e); }
+      try { this.bindSettings(); } catch (e) { console.error('bindSettings failed', e); }
+      try { this.bindOverlays(); } catch (e) { console.error('bindOverlays failed', e); }
+      try { this.applyTheme(); } catch (e) { console.error('applyTheme failed', e); }
       this.updateSaveStatus('ready');
     },
 
@@ -180,7 +181,16 @@
     },
 
     bindHeaderActions() {
-      this.dom.btnRun.addEventListener('click', () => JSP.Commands.run('button'));
+      this.dom.btnRun.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        try {
+          JSP.Commands.run('button');
+        } catch (err) {
+          console.error('Run failed', err);
+          try { this.appendConsole('error', 'Run failed: ' + (err && err.message ? err.message : err)); } catch (_) {}
+        }
+      });
       this.dom.btnSave.addEventListener('click', () => JSP.Commands.save());
       this.dom.btnTheme.addEventListener('click', () => JSP.Commands.toggleTheme());
       this.dom.btnSettings.addEventListener('click', () => this.openSettings());
@@ -534,7 +544,8 @@
      * CONSOLE
      * ============================================================ */
     appendConsole(level, args) {
-      const body = this.dom.consoleBody;
+      const body = this.dom && this.dom.consoleBody;
+      if (!body) return;
       // Remove "empty" placeholder if present.
       const empty = body.querySelector('.console-empty');
       if (empty) empty.remove();

@@ -288,26 +288,40 @@ body {
 .tree-node.expanded > .tree-children { display: block; }
 
 /* ---------- Workspace ---------- */
-/* Bottom docking (default on small screens / when user selects bottom). */
+/* Named areas keep the console on-screen at every breakpoint.
+   Bottom docking (default on small screens / when user selects bottom):
+     tabs / breadcrumb / editor / h-handle / console
+   Right docking (desktop):
+     tabs+breadcrumb span full width; editor | v-handle | console */
 .workspace {
   display: grid;
-  grid-template-rows: var(--tabs-height) var(--breadcrumb-height) 1fr var(--panel-size, var(--console-default-height));
+  grid-template-areas:
+    "tabs"
+    "breadcrumb"
+    "editor"
+    "hhandle"
+    "console";
+  grid-template-rows: var(--tabs-height) var(--breadcrumb-height) 1fr 5px var(--panel-size, var(--console-default-height));
   grid-template-columns: 1fr;
   min-width: 0;
   min-height: 0;
   background: var(--bg-editor);
 }
 .workspace.console-hidden {
-  grid-template-rows: var(--tabs-height) var(--breadcrumb-height) 1fr 0;
+  grid-template-rows: var(--tabs-height) var(--breadcrumb-height) 1fr 0 0;
 }
 
 /* Right docking — editor and panel sit side-by-side. */
 .workspace.panel-right {
+  grid-template-areas:
+    "tabs       tabs    tabs"
+    "breadcrumb breadcrumb breadcrumb"
+    "editor     vhandle console";
   grid-template-rows: var(--tabs-height) var(--breadcrumb-height) 1fr;
-  grid-template-columns: 1fr var(--panel-size, var(--console-default-width));
+  grid-template-columns: 1fr 5px var(--panel-size, var(--console-default-width));
 }
 .workspace.panel-right.console-hidden {
-  grid-template-columns: 1fr 0;
+  grid-template-columns: 1fr 0 0;
 }
 
 /* ---------- Tabs ---------- */
@@ -319,7 +333,7 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
-  grid-column: 1 / -1;
+  grid-area: tabs;
 }
 .tabs::-webkit-scrollbar { height: 3px; }
 .tab {
@@ -412,7 +426,7 @@ body {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  grid-column: 1 / -1;
+  grid-area: breadcrumb;
 }
 
 /* ---------- Editor ---------- */
@@ -421,12 +435,7 @@ body {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
-  grid-row: 3;
-  grid-column: 1;
-}
-.workspace.panel-right .editor-area {
-  grid-row: 3;
-  grid-column: 1;
+  grid-area: editor;
 }
 #editor-container, .monaco-editor {
   width: 100%;
@@ -476,17 +485,14 @@ body {
   min-width: 0;
   overflow: hidden;
   position: relative;
+  grid-area: console;
 }
 .workspace:not(.panel-right) .console-panel {
   border-top: 1px solid var(--border);
-  grid-row: 4;
-  grid-column: 1 / -1;
 }
 .workspace.panel-right .console-panel {
   border-left: 1px solid var(--border);
   border-top: none;
-  grid-row: 3;
-  grid-column: 2;
 }
 .workspace.console-hidden .console-panel { display: none; }
 
@@ -528,6 +534,7 @@ body {
 
 .console-body, .problems-body {
   flex: 1;
+  min-height: 80px;
   overflow: auto;
   padding: 6px 0;
   font-family: var(--font-mono);
@@ -597,8 +604,7 @@ body {
   background: transparent;
   cursor: ns-resize;
   flex-shrink: 0;
-  grid-row: 4;
-  grid-column: 1 / -1;
+  grid-area: hhandle;
   position: relative;
   z-index: 10;
 }
@@ -613,8 +619,7 @@ body {
   background: transparent;
   cursor: ew-resize;
   flex-shrink: 0;
-  grid-row: 3;
-  grid-column: 2;
+  grid-area: vhandle;
   position: relative;
   z-index: 10;
 }

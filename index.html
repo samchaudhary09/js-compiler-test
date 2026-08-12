@@ -327,19 +327,31 @@
 
   <!-- Monaco loader (versioned CDN) -->
   <script>
-    // Monaco base path — must work under subpaths on GitHub Pages.
-    window.MonacoEnvironment = {
-      getWorkerUrl: function (moduleId, label) {
-        // Use versioned CDN with correct worker files.
-        var version = '0.45.0';
-        var base = 'https://cdn.jsdelivr.net/npm/monaco-editor@' + version + '/min/vs';
-        if (label === 'json') return base + '/language/json/json.worker.js';
-        if (label === 'css' || label === 'scss' || label === 'less') return base + '/language/css/css.worker.js';
-        if (label === 'html' || label === 'handlebars' || label === 'razor') return base + '/language/html/html.worker.js';
-        if (label === 'typescript' || label === 'javascript') return base + '/language/ts/ts.worker.js';
-        return base + '/editor/editor.worker.js';
+    // Monaco workers are hosted on a CDN (cross-origin). Browsers refuse to
+    // construct a Worker from a foreign URL, so we proxy each worker through
+    // a same-origin blob that importScripts() the real file.
+    (function () {
+      var version = '0.45.0';
+      var base = 'https://cdn.jsdelivr.net/npm/monaco-editor@' + version + '/min/vs';
+      var cache = {};
+      function proxy(path) {
+        if (cache[path]) return cache[path];
+        var src =
+          'self.MonacoEnvironment={baseUrl:' + JSON.stringify(base + '/') + '};' +
+          'importScripts(' + JSON.stringify(base + '/' + path) + ');';
+        cache[path] = URL.createObjectURL(new Blob([src], { type: 'text/javascript' }));
+        return cache[path];
       }
-    };
+      window.MonacoEnvironment = {
+        getWorkerUrl: function (moduleId, label) {
+          if (label === 'json') return proxy('language/json/json.worker.js');
+          if (label === 'css' || label === 'scss' || label === 'less') return proxy('language/css/css.worker.js');
+          if (label === 'html' || label === 'handlebars' || label === 'razor') return proxy('language/html/html.worker.js');
+          if (label === 'typescript' || label === 'javascript') return proxy('language/ts/ts.worker.js');
+          return proxy('editor/editor.worker.js');
+        }
+      };
+    })();
   </script>
   <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.45.0/min/vs/loader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>

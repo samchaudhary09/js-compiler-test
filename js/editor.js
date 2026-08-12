@@ -53,11 +53,8 @@
         this.monaco = await loadMonaco();
       } catch (e) {
         const msg = (e && e.message) ? e.message : String(e);
-        container.innerHTML =
-          '<div class="editor-empty">Could not load the code editor. Please check your internet connection and reload.<br><small></small></div>';
-        const small = container.querySelector('small');
-        if (small) small.textContent = msg;
-        throw e;
+        this._installFallbackEditor(container, msg);
+        return this.editor;
       }
 
       const monaco = this.monaco;
@@ -407,10 +404,28 @@
 
       // Preserve view state of currently-active model.
       if (State.activeFileId) {
-        const currentModel = this.editor.getModel();
-        if (currentModel) {
+        try {
           State.viewStates.set(State.activeFileId, this.editor.saveViewState());
+        } catch (_) {}
+      }
+
+      // Plain-textarea fallback (Monaco unavailable).
+      if (this._fallbackTextarea) {
+        const empty = document.getElementById('editor-empty');
+        if (empty) empty.hidden = true;
+        this._fallbackTextarea.value = file.content || '';
+        State.activeFileId = fileId;
+        if (!State.openTabs.includes(fileId)) State.openTabs.push(fileId);
+        const vs = State.viewStates.get(fileId);
+        try { this.editor.restoreViewState(vs); } catch (_) {}
+        if (JSP.UI) {
+          JSP.UI.renderTabs();
+          JSP.UI.renderFileTree();
+          JSP.UI.updateBreadcrumb();
         }
+        this._updateFallbackCursor(this._fallbackTextarea);
+        this._fallbackTextarea.focus();
+        return;
       }
 
       const model = this.getModel(file);
@@ -542,9 +557,11 @@
       });
       // Update all model tab sizes.
       for (const m of State.models.values()) {
-        m.updateOptions({ tabSize: s.tabSize });
+        if (m && m.updateOptions) m.updateOptions({ tabSize: s.tabSize });
       }
-      this.monaco.editor.setTheme(s.theme === 'light' ? 'jsp-light' : 'jsp-dark');
+      if (this.monaco && this.monaco.editor) {
+        this.monaco.editor.setTheme(s.theme === 'light' ? 'jsp-light' : 'jsp-dark');
+      }
     },
 
     /** Format the active document. */
@@ -561,8 +578,118 @@
       }
     },
 
+    /**
+     * Plain-textarea editor used when Monaco cannot be loaded (offline, CDN
+     * blocked, etc.). Implements the tiny subset of the Monaco API that the
+     * rest of the app touches so Run / Save / tabs keep working.
+     */
+    _installFallbackEditor(container, reason) {
+      const file = State.activeFileId ? State.files.get(State.activeFileId) : null;
+      const wrap = document.createElement('div');
+      wrap.className = 'fallback-editor-wrap';
+      wrap.style.cssText = 'display:flex;flex-direction:column;height:100%;min-height:0;';
+      const note = document.createElement('div');
+      note.className = 'editor-empty';
+      note.style.cssText = 'flex:0 0 auto;height:auto;padding:8px 12px;font-size:12px;';
+      note.textContent = 'Using a basic editor — Monaco could not be loaded' + (reason ? ' (' + reason + ')' : '') + '. Run still works.';
+      const ta = document.createElement('textarea');
+      ta.id = 'fallback-editor';
+      ta.setAttribute('spellcheck', 'false');
+      ta.setAttribute('aria-label', 'JavaScript editor');
+      ta.style.cssText = 'flex:1;min-height:0;width:100%;resize:none;border:0;outline:none;padding:12px 14px;background:var(--bg-editor);color:var(--text);font-family:var(--font-mono);font-size:' + (State.settings.fontSize || 15) + 'px;line-height:1.5;tab-size:' + (State.settings.tabSize || 2) + ';';
+      ta.value = file ? (file.content || '') : '';
+      wrap.appendChild(note);
+      wrap.appendChild(ta);
+      container.innerHTML = '';
+      container.appendChild(wrap);
+
+      const self = this;
+      ta.addEventListener('input', () => {
+        const f = State.files.get(State.activeFileId);
+        if (f) {
+          f.content = ta.value;
+          if (JSP.UI && JSP.UI.updateTabDirtyState) JSP.UI.updateTabDirtyState(f.id);
+        }
+        if (State.settings.autoSave && JSP.Commands) JSP.Commands.scheduleAutoSave();
+        else if (JSP.UI) JSP.UI.updateSaveStatus('unsaved');
+      });
+      ta.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+          e.preventDefault();
+          if (JSP.Commands) JSP.Commands.run('shortcut');
+        } else if (e.key === 'Tab') {
+          e.preventDefault();
+          const start = ta.selectionStart;
+          const end = ta.selectionEnd;
+          const spaces = ' '.repeat(State.settings.tabSize || 2);
+          ta.value = ta.value.slice(0, start) + spaces + ta.value.slice(end);
+          ta.selectionStart = ta.selectionEnd = start + spaces.length;
+          ta.dispatchEvent(new Event('input'));
+        }
+      });
+      ta.addEventListener('click', () => self._updateFallbackCursor(ta));
+      ta.addEventListener('keyup', () => self._updateFallbackCursor(ta));
+
+      this._fallbackTextarea = ta;
+      this.editor = {
+        getModel: () => ({
+          getValue: () => ta.value,
+          setValue: (v) => { ta.value = v; }
+        }),
+        getValue: () => ta.value,
+        setValue: (v) => { ta.value = v; },
+        getPosition: () => self._fallbackPosition(ta),
+        focus: () => ta.focus(),
+        layout: () => {},
+        updateOptions: (opts) => {
+          if (opts && opts.fontSize) ta.style.fontSize = opts.fontSize + 'px';
+          if (opts && opts.tabSize) ta.style.tabSize = String(opts.tabSize);
+        },
+        setModel: () => {},
+        saveViewState: () => ({ sel: [ta.selectionStart, ta.selectionEnd], scroll: ta.scrollTop }),
+        restoreViewState: (vs) => {
+          if (!vs) return;
+          if (vs.sel) { ta.selectionStart = vs.sel[0]; ta.selectionEnd = vs.sel[1]; }
+          if (typeof vs.scroll === 'number') ta.scrollTop = vs.scroll;
+        },
+        getAction: () => null,
+        addAction: () => ({ dispose: () => {} }),
+        getSelection: () => ({ startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 }),
+        executeEdits: (_src, edits) => {
+          if (edits && edits[0] && typeof edits[0].text === 'string') {
+            ta.value += edits[0].text;
+          }
+        },
+        onDidChangeModelContent: () => ({ dispose: () => {} }),
+        onDidChangeCursorPosition: () => ({ dispose: () => {} }),
+        onDidChangeModel: () => ({ dispose: () => {} }),
+        revealPositionInCenter: () => {},
+        setPosition: () => {}
+      };
+      State.editor = this.editor;
+      const empty = document.getElementById('editor-empty');
+      if (empty && State.activeFileId) empty.hidden = true;
+      this._updateFallbackCursor(ta);
+    },
+
+    _fallbackPosition(ta) {
+      const value = ta.value.slice(0, ta.selectionStart);
+      const lines = value.split('\n');
+      return { lineNumber: lines.length, column: lines[lines.length - 1].length + 1 };
+    },
+
+    _updateFallbackCursor(ta) {
+      const pos = this._fallbackPosition(ta);
+      const el = document.getElementById('status-cursor');
+      if (el) el.textContent = 'Ln ' + pos.lineNumber + ', Col ' + pos.column;
+    },
+
     /** Focus the editor. */
     focus() {
+      if (this._fallbackTextarea) {
+        this._fallbackTextarea.focus();
+        return;
+      }
       if (this.editor) this.editor.focus();
     },
 
