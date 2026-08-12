@@ -13,12 +13,16 @@
   <link rel="stylesheet" href="./css/layout.css" />
   <link rel="stylesheet" href="./css/components.css" />
   <link rel="stylesheet" href="./css/responsive.css" />
+  <link rel="stylesheet" href="./css/upgrade.css" />
 </head>
 <body class="theme-dark">
   <a class="skip-link" href="#editor-container">Skip to editor</a>
 
   <!-- ============ HEADER ============ -->
   <header class="app-header" role="banner">
+    <button type="button" id="btn-mobile-menu" class="mobile-menu-btn" title="Open Explorer" aria-label="Open Explorer" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="6" x2="20" y2="6"/><line x1="4" y1="12" x2="20" y2="12"/><line x1="4" y1="18" x2="20" y2="18"/></svg>
+    </button>
     <div class="brand">
       <span class="brand-logo" aria-hidden="true">
         <svg width="22" height="22" viewBox="0 0 32 32" role="img" aria-label="JS Playground logo">
@@ -57,6 +61,9 @@
       <button type="button" id="btn-settings" class="header-btn icon-only" title="Settings" aria-label="Settings">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
+      <button type="button" id="btn-practice" class="header-btn icon-only" title="Practice exercises" aria-label="Practice exercises">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 6h8M8 10h8"/></svg>
+      </button>
       <button type="button" id="btn-about" class="header-btn icon-only" title="About JS Playground" aria-label="About">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
       </button>
@@ -82,10 +89,29 @@
           <button type="button" id="btn-collapse-all" class="sidebar-btn" title="Collapse All" aria-label="Collapse all folders">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/><line x1="14" y1="10" x2="21" y2="3"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
           </button>
+          <button type="button" id="btn-refresh-tree" class="sidebar-btn" title="Refresh Explorer" aria-label="Refresh explorer">↻</button>
         </div>
       </div>
       <div class="project-name" id="project-name">JS PLAYGROUND</div>
       <nav class="file-tree" id="file-tree" role="tree" aria-label="Project files"></nav>
+      <section class="sidebar-section outline-section" aria-labelledby="outline-title">
+        <header class="sidebar-section-header">
+          <span id="outline-title">OUTLINE</span>
+          <button type="button" class="sidebar-btn" id="btn-refresh-outline" title="Refresh Outline" aria-label="Refresh outline">↻</button>
+        </header>
+        <nav id="outline-list" class="outline-list" aria-label="Document outline">
+          <p class="sidebar-empty">Open a file to see its symbols.</p>
+        </nav>
+      </section>
+      <section class="sidebar-section history-section" aria-labelledby="history-title">
+        <header class="sidebar-section-header">
+          <span id="history-title">RUN HISTORY</span>
+          <button type="button" class="sidebar-btn" id="btn-clear-history" title="Clear Run History" aria-label="Clear run history">×</button>
+        </header>
+        <nav id="history-list" class="history-list" aria-label="Run history">
+          <p class="sidebar-empty">No runs yet.</p>
+        </nav>
+      </section>
     </aside>
 
     <div class="sidebar-overlay" id="sidebar-overlay" hidden></div>
@@ -102,9 +128,16 @@
       <div class="editor-area">
         <div id="editor-container"></div>
         <div class="editor-empty-overlay" id="editor-empty" hidden>
-          <div>
-            <p><strong>No file open</strong></p>
-            <p>Create a new file from the Explorer, or press <kbd id="kbd-new-file">Ctrl/Cmd+N</kbd>.</p>
+          <div class="empty-state-content">
+            <div class="empty-state-mark" aria-hidden="true">JS</div>
+            <p class="empty-state-title"><strong>JS Playground</strong></p>
+            <p class="empty-state-subtitle">Write, Run &amp; Practice JavaScript</p>
+            <p>Create a new file or open an example to get started.</p>
+            <div class="empty-state-actions">
+              <button type="button" class="modal-btn primary" id="empty-new-file">+ New File</button>
+              <button type="button" class="modal-btn" id="empty-open-examples">Open Examples</button>
+            </div>
+            <div class="empty-shortcuts"><span><kbd id="kbd-quick-open">Ctrl/Cmd+P</kbd> Quick Open</span><span><kbd id="kbd-command-palette">Ctrl/Cmd+Shift+P</kbd> Commands</span><span><kbd id="kbd-run">Ctrl/Cmd+Enter</kbd> Run</span></div>
           </div>
         </div>
       </div>
@@ -118,9 +151,11 @@
       <!-- Console panel -->
       <section class="console-panel" id="console-panel" aria-label="Console output">
         <header class="console-header">
-          <div class="console-tabs">
-            <button type="button" class="console-tab active" data-panel="output">CONSOLE</button>
-            <button type="button" class="console-tab" data-panel="problems" id="problems-tab">PROBLEMS <span class="problem-count" id="problem-count" hidden>0</span></button>
+          <div class="console-tabs" role="tablist" aria-label="Bottom panel">
+            <button type="button" class="console-tab active" data-panel="console" role="tab" aria-selected="true">CONSOLE</button>
+            <button type="button" class="console-tab" data-panel="problems" id="problems-tab" role="tab" aria-selected="false">PROBLEMS <span class="problem-count" id="problem-count" hidden>0</span></button>
+            <button type="button" class="console-tab" data-panel="output" role="tab" aria-selected="false">OUTPUT</button>
+            <button type="button" class="console-tab" data-panel="preview" role="tab" aria-selected="false">PREVIEW</button>
           </div>
           <div class="console-actions">
             <button type="button" id="btn-dock-bottom" class="console-btn icon-only" title="Dock panel to bottom" aria-label="Dock panel to bottom">
@@ -136,9 +171,24 @@
             </button>
           </div>
         </header>
-        <div class="console-body" id="console-body" role="log" aria-live="polite" tabindex="0"></div>
-        <div class="problems-body" id="problems-body" hidden>
+        <div class="console-body panel-view" id="console-body" role="log" aria-live="polite" tabindex="0"></div>
+        <div class="problems-body panel-view" id="problems-body" hidden>
           <ul id="problems-list"></ul>
+        </div>
+        <div class="output-body panel-view" id="output-body" hidden role="log" aria-live="polite">
+          <ul id="output-list"></ul>
+        </div>
+        <div class="preview-body panel-view" id="preview-body" hidden>
+          <div class="preview-toolbar">
+            <span class="preview-caption">Sandboxed DOM preview</span>
+            <div class="preview-actions">
+              <button type="button" class="console-btn" id="btn-refresh-preview">Refresh</button>
+              <button type="button" class="console-btn" id="btn-open-preview">Open</button>
+              <button type="button" class="console-btn" id="btn-clear-preview">Clear</button>
+            </div>
+          </div>
+          <iframe id="preview-frame" title="Sandboxed JavaScript preview" sandbox="allow-scripts" referrerpolicy="no-referrer"></iframe>
+          <p class="preview-help">Preview runs the active file in an isolated iframe. It cannot access the JS Playground application.</p>
         </div>
       </section>
     </section>
@@ -156,6 +206,7 @@
       <span class="status-item" id="status-encoding">UTF-8</span>
       <span class="status-item" id="status-indent">Spaces: 2</span>
       <span class="status-item" id="status-cursor">Ln 1, Col 1</span>
+      <span class="status-item" id="status-sandbox">Sandbox: Worker</span>
       <button type="button" class="status-item status-btn" id="status-sidebar-toggle" title="Toggle Sidebar (Ctrl/Cmd+B)" aria-label="Toggle sidebar">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="15" y1="3" x2="15" y2="21"/></svg>
       </button>
@@ -170,6 +221,19 @@
     <div class="quick-open" role="document">
       <input type="text" id="quick-open-input" class="quick-open-input" placeholder="Search files by name (e.g. array)..." aria-label="Search files" autocomplete="off" />
       <ul class="quick-open-results" id="quick-open-results" role="listbox"></ul>
+    </div>
+  </div>
+
+  <!-- ============ PROJECT SEARCH ============ -->
+  <div class="overlay" id="project-search-overlay" hidden role="dialog" aria-modal="true" aria-label="Search Project">
+    <div class="project-search-panel" role="document">
+      <div class="search-heading"><strong>Search Project</strong><button type="button" class="icon-close" id="project-search-close" aria-label="Close search">×</button></div>
+      <div class="project-search-controls">
+        <input type="search" id="project-search-input" class="quick-open-input" placeholder="Search in all files..." aria-label="Search project" autocomplete="off" />
+        <label><input type="checkbox" id="search-case-sensitive" /> Match case</label>
+        <label><input type="checkbox" id="search-whole-word" /> Whole word</label>
+      </div>
+      <ul class="quick-open-results project-search-results" id="project-search-results" role="listbox"></ul>
     </div>
   </div>
 
@@ -199,6 +263,7 @@
           <select id="set-theme">
             <option value="dark">Dark</option>
             <option value="light">Light</option>
+            <option value="contrast">High Contrast</option>
           </select>
         </div>
         <div class="setting-row">
@@ -206,11 +271,29 @@
           <input type="range" id="set-font-size" min="12" max="24" step="1" value="15" />
         </div>
         <div class="setting-row">
+          <label for="set-font-family">Font Family</label>
+          <select id="set-font-family">
+            <option value="JetBrains Mono">JetBrains Mono</option>
+            <option value="Fira Code">Fira Code</option>
+            <option value="SFMono-Regular">SFMono-Regular</option>
+            <option value="Consolas">Consolas</option>
+            <option value="monospace">System monospace</option>
+          </select>
+        </div>
+        <div class="setting-row">
           <label for="set-tab-size">Tab Size</label>
           <select id="set-tab-size">
             <option value="2">2 spaces</option>
             <option value="4">4 spaces</option>
           </select>
+        </div>
+        <div class="setting-row">
+          <label for="set-ligatures">Font Ligatures</label>
+          <label class="switch"><input type="checkbox" id="set-ligatures" checked /><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <label for="set-line-numbers">Line Numbers</label>
+          <label class="switch"><input type="checkbox" id="set-line-numbers" checked /><span class="slider"></span></label>
         </div>
         <div class="setting-row">
           <label for="set-word-wrap">Word Wrap</label>
@@ -225,11 +308,20 @@
           <label class="switch"><input type="checkbox" id="set-autosave" checked /><span class="slider"></span></label>
         </div>
         <div class="setting-row">
-          <label for="set-panel-position">Console Panel</label>
+          <label for="set-panel-position">Panel Position</label>
           <select id="set-panel-position">
-            <option value="right">Dock to right</option>
-            <option value="bottom">Dock to bottom</option>
+            <option value="right">Right</option>
+            <option value="bottom">Bottom</option>
+            <option value="hidden">Hidden</option>
           </select>
+        </div>
+        <div class="setting-row">
+          <label for="set-confirm-close">Confirm Modified File Close</label>
+          <label class="switch"><input type="checkbox" id="set-confirm-close" checked /><span class="slider"></span></label>
+        </div>
+        <div class="setting-row">
+          <label for="set-restore-tabs">Restore Open Tabs</label>
+          <label class="switch"><input type="checkbox" id="set-restore-tabs" checked /><span class="slider"></span></label>
         </div>
         <div class="setting-row">
           <label>Platform (keyboard layout)</label>
@@ -293,6 +385,25 @@
         <button type="button" class="modal-btn" data-action="discard">Don't Save</button>
         <button type="button" class="modal-btn primary" data-action="save">Save</button>
       </div>
+    </form>
+  </dialog>
+
+  <!-- ============ JAVASCRIPT INPUT DIALOG ============ -->
+  <dialog class="modal" id="input-dialog" aria-labelledby="input-title">
+    <form method="dialog" class="modal-form input-form">
+      <h3 id="input-title">JavaScript Input</h3>
+      <p class="modal-message" id="input-message">Your program is asking for input.</p>
+      <input type="text" id="input-value" class="modal-input" autocomplete="off" aria-label="JavaScript input value" />
+      <div class="modal-actions"><button type="button" class="modal-btn" data-action="cancel">Cancel</button><button type="button" class="modal-btn primary" data-action="submit">Submit</button></div>
+    </form>
+  </dialog>
+
+  <!-- ============ PRACTICE DIALOG ============ -->
+  <dialog class="modal" id="practice-dialog" aria-labelledby="practice-title">
+    <form method="dialog" class="modal-form practice-form">
+      <div class="practice-heading"><div><span class="eyebrow">LOCAL PRACTICE</span><h3 id="practice-title">Practice JavaScript</h3></div><button type="button" class="icon-close" data-action="close" aria-label="Close practice">×</button></div>
+      <div id="practice-content"></div>
+      <div class="modal-actions"><button type="button" class="modal-btn" data-action="close">Close</button><button type="button" class="modal-btn primary" data-action="open">Open Exercise</button></div>
     </form>
   </dialog>
 
@@ -368,6 +479,7 @@
   <script src="./js/ui.js"></script>
   <script src="./js/commands.js"></script>
   <script src="./js/shortcuts.js"></script>
+  <script src="./js/upgrade.js"></script>
   <script src="./js/app.js"></script>
 </body>
 </html>

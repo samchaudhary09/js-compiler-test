@@ -464,15 +464,26 @@
           const zip = await JSZip.loadAsync(file);
           const files = [];
           const entries = Object.keys(zip.files);
-          for (const path of entries) {
-            const entry = zip.files[path];
+          const seenPaths = new Set();
+          let totalBytes = 0;
+          if (entries.length > 500) throw new Error('The project contains too many entries.');
+          for (const rawPath of entries) {
+            const entry = zip.files[rawPath];
             if (entry.dir) continue;
-            // Skip hidden and common non-JS files.
-            const base = path.split('/').pop();
-            if (base.startsWith('.') || base.endsWith('/')) continue;
-            if (!/\.js$/i.test(base)) continue;
+            // Normalize and reject traversal, absolute paths, hidden files,
+            // duplicates, and oversized imports before adding anything.
+            const path = String(rawPath).replace(/\\/g, '/');
+            const parts = path.split('/').filter(Boolean);
+            if (!parts.length || path.startsWith('/') || parts.some((part) => part === '..' || part === '.' || /[\u0000-\u001f]/.test(part))) continue;
+            const safePath = parts.join('/');
+            const base = parts[parts.length - 1];
+            if (base.startsWith('.') || !/\.(js|mjs|cjs|jsx)$/i.test(base)) continue;
+            if (seenPaths.has(safePath)) continue;
             const content = await entry.async('string');
-            files.push({ path: path, content: content });
+            totalBytes += content.length;
+            if (totalBytes > 2 * 1024 * 1024) throw new Error('The project is larger than the 2 MB browser import limit.');
+            seenPaths.add(safePath);
+            files.push({ path: safePath, content: content });
           }
           if (files.length === 0) {
             UI.toast('No .js files found in the ZIP.', 'error');

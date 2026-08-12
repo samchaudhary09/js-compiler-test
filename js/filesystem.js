@@ -196,8 +196,9 @@
       // Sort so folders are created implicitly in order.
       files.sort((a, b) => a.path.localeCompare(b.path));
       for (const f of files) {
-        const parts = f.path.split('/').filter(Boolean);
-        if (parts.length === 0) continue;
+        const safePath = String(f.path || '').replace(/\\/g, '/');
+        const parts = safePath.split('/').filter(Boolean);
+        if (parts.length === 0 || safePath.startsWith('/') || parts.some((part) => part === '..' || part === '.' || /[\u0000-\u001f]/.test(part))) continue;
         let parent = State.project;
         for (let i = 0; i < parts.length - 1; i++) {
           const folderName = parts[i];
@@ -216,7 +217,7 @@
           parent = next;
         }
         const fileName = parts[parts.length - 1];
-        if (!/\.js$/i.test(fileName)) continue; // only JS for now
+        if (!/\.(js|mjs|cjs|jsx)$/i.test(fileName)) continue;
         const file = {
           id: Utils.uid('file'),
           type: 'file',

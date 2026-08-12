@@ -65,8 +65,8 @@
         inherit: true,
         rules: [],
         colors: {
-          'editor.background': '#1e1e1e',
-          'editor.foreground': '#d4d4d4',
+          'editor.background': '#111820',
+          'editor.foreground': '#d6dee6',
           'editorLineNumber.foreground': '#858585',
           'editorLineNumber.activeForeground': '#c6c6c6',
           'editorCursor.foreground': '#aeafad',
@@ -83,7 +83,7 @@
           'editorHoverWidget.background': '#252526',
           'editorHoverWidget.border': '#454545',
           'peekView.border': '#007acc',
-          'peekViewEditor.background': '#1e1e1e',
+          'peekViewEditor.background': '#111820',
           'peekViewResult.background': '#252526'
         }
       });
@@ -93,14 +93,18 @@
         inherit: true,
         rules: [],
         colors: {
-          'editor.background': '#ffffff',
-          'editor.foreground': '#333333',
+          'editor.background': '#f5f8fa',
+          'editor.foreground': '#2b3a46',
           'editorLineNumber.foreground': '#999999',
           'editorLineNumber.activeForeground': '#333333',
           'editorCursor.foreground': '#000000',
           'editor.selectionBackground': '#add6ff',
           'editor.inactiveSelectionBackground': '#d9d9d9',
-          'editor.lineHighlightBackground': '#f7f7f7'
+          'editor.lineHighlightBackground': '#eaf1f5',
+          'editorIndentGuide.background1': '#d6e1e8',
+          'editorIndentGuide.activeBackground1': '#9ab6c7',
+          'editorWidget.background': '#ffffff',
+          'editorWidget.border': '#c8d4de'
         }
       });
 
@@ -609,6 +613,7 @@
         if (f) {
           f.content = ta.value;
           if (JSP.UI && JSP.UI.updateTabDirtyState) JSP.UI.updateTabDirtyState(f.id);
+          if (JSP.UI && JSP.UI.renderOutline) JSP.UI.renderOutline();
         }
         if (State.settings.autoSave && JSP.Commands) JSP.Commands.scheduleAutoSave();
         else if (JSP.UI) JSP.UI.updateSaveStatus('unsaved');
@@ -644,6 +649,8 @@
         updateOptions: (opts) => {
           if (opts && opts.fontSize) ta.style.fontSize = opts.fontSize + 'px';
           if (opts && opts.tabSize) ta.style.tabSize = String(opts.tabSize);
+          if (opts && opts.fontFamily) ta.style.fontFamily = opts.fontFamily;
+          if (opts && opts.wordWrap) ta.style.whiteSpace = opts.wordWrap === 'on' ? 'pre-wrap' : 'pre';
         },
         setModel: () => {},
         saveViewState: () => ({ sel: [ta.selectionStart, ta.selectionEnd], scroll: ta.scrollTop }),
