@@ -1364,9 +1364,10 @@
   };
 
   function recordHistory(status, duration) {
+    const runFileId = Execution._upgradeRunFileId || State.activeFileId;
     const entry = {
-      id: Utils.uid('run'), timestamp: Date.now(), fileId: State.activeFileId,
-      filePath: State.activeFileId ? filePath(State.activeFileId) : 'selection',
+      id: Utils.uid('run'), timestamp: Date.now(), fileId: runFileId,
+      filePath: runFileId ? filePath(runFileId) : 'selection',
       status: status === 'done' && !State._activeRunHadError ? 'done' : 'error',
       duration: Number(duration) || 0,
       output: (State._activeRunOutput || []).join('\n').slice(0, 4000)
@@ -1376,12 +1377,14 @@
     UI.renderHistory();
     State._activeRunOutput = [];
     State._activeRunHadError = false;
+    Execution._upgradeRunFileId = null;
   }
 
   const originalExecutionRun = Execution.run;
   Execution.run = function (source, meta) {
     State._activeRunOutput = [];
     State._activeRunHadError = false;
+    this._upgradeRunFileId = State.activeFileId;
     this._upgradeRunMeta = meta || {};
     const result = originalExecutionRun.call(this, source);
     return result;
