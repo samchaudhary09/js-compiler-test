@@ -1,0 +1,150 @@
+/* ============ responsive.css ============ */
+
+/* Large tablets / small desktops */
+@media (max-width: 1100px) {
+  :root {
+    --sidebar-width: 200px;
+  }
+  .brand-subtitle {
+    display: none;
+  }
+  /* Narrower right panel on small laptops */
+  .workspace.panel-right {
+    --panel-size: 320px;
+  }
+}
+
+/* Tablet */
+@media (max-width: 900px) {
+  /* Right-docked panel becomes bottom on tablets for readability */
+  .workspace.panel-right {
+    grid-template-rows: var(--tabs-height) var(--breadcrumb-height) 1fr var(--panel-size, 45vh);
+    grid-template-columns: 1fr;
+  }
+  .workspace.panel-right .editor-area {
+    grid-row: 3;
+    grid-column: 1;
+  }
+  .workspace.panel-right .console-resize-v { display: none !important; }
+  .workspace.panel-right .console-resize-h {
+    display: block !important;
+    grid-row: 4;
+    grid-column: 1;
+  }
+  .workspace.panel-right .console-panel {
+    grid-row: 5;
+    grid-column: 1;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+}
+
+/* Mobile */
+@media (max-width: 768px) {
+  :root {
+    --sidebar-width: 280px;
+    --header-height: 46px;
+    --tabs-height: 34px;
+    --breadcrumb-height: 0px;
+    --console-default-height: 42vh;
+    --panel-size: 42vh;
+    font-size: 15px;
+  }
+
+  .breadcrumb { display: none; }
+
+  .app-main {
+    grid-template-columns: 1fr;
+  }
+  .app-main.sidebar-hidden {
+    grid-template-columns: 1fr;
+  }
+
+  .sidebar {
+    position: fixed;
+    top: var(--header-height);
+    bottom: var(--statusbar-height);
+    left: 0;
+    width: var(--sidebar-width);
+    max-width: 85vw;
+    z-index: 500;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: var(--shadow);
+  }
+  .app-main:not(.sidebar-hidden) .sidebar {
+    transform: translateX(0);
+  }
+  .sidebar-overlay {
+    display: block;
+    position: fixed;
+    inset: var(--header-height) 0 var(--statusbar-height) 0;
+    background: var(--bg-overlay);
+    z-index: 400;
+  }
+  .app-main.sidebar-hidden .sidebar-overlay {
+    display: none;
+  }
+
+  /* Hide some chrome on small screens */
+  .menu-bar { display: none; }
+  .btn-label { display: none; }
+  .header-btn { padding: 7px; }
+  .header-actions { gap: 2px; }
+  .brand-title { font-size: 13px; }
+  .brand-logo svg { width: 22px; height: 22px; }
+  .brand-text { display: none; }
+
+  .tab {
+    min-width: 110px;
+    max-width: 160px;
+    padding: 0 8px;
+    font-size: 12px;
+  }
+  .tab-new { width: 36px; }
+
+  .workspace {
+    grid-template-rows: var(--tabs-height) 1fr var(--panel-size, 42vh);
+  }
+  .workspace.console-hidden {
+    grid-template-rows: var(--tabs-height) 1fr 0;
+  }
+
+  .status-item { padding: 0 5px; font-size: 11px; }
+  #status-encoding, #status-indent, #status-language { display: none; }
+
+  .console-btn { padding: 4px 6px; font-size: 11px; }
+
+  /* Larger touch targets for file tree */
+  .tree-row { padding-top: 7px; padding-bottom: 7px; }
+}
+
+@media (max-width: 480px) {
+  .brand-subtitle { display: none; }
+  .console-btn#btn-copy-console { display: none; }
+  .header-actions .header-btn.primary { padding: 7px 10px; }
+  .header-actions .header-btn.primary .btn-label { display: inline; font-size: 12px; }
+}
+
+/* Very small phones */
+@media (max-width: 380px) {
+  .header-actions { gap: 1px; }
+  .header-btn { padding: 6px; }
+}
+
+/* Landscape phones — give console more width */
+@media (max-height: 480px) and (orientation: landscape) {
+  :root {
+    --console-default-height: 55vh;
+    --panel-size: 55vh;
+  }
+}
+
+/* Minimap disabled on small screens via class (applied in JS) */
+body.no-minimap .minimap,
+body.no-minimap .monaco-editor .minimap {
+  display: none !important;
+}
+@media (max-width: 768px) {
+  .monaco-editor .minimap { display: none !important; }
+}
