@@ -75,6 +75,9 @@
     const container = document.getElementById('editor-container');
     try {
       await Editor.init(container);
+      if (Editor._fallbackTextarea) {
+        UI.appendConsole('system', 'Monaco editor could not be loaded — using a basic editor. Run still works.');
+      }
     } catch (e) {
       console.error('Editor failed to initialize:', e);
       UI.appendConsole('error', 'The code editor could not be loaded. Check your internet connection and reload.');

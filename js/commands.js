@@ -45,23 +45,45 @@
 
     /* ---------------- Execution ---------------- */
     run(source) {
-      if (Execution.isRunning()) {
-        this.stop('user');
-        return;
+      try {
+        if (Execution.isRunning()) {
+          this.stop('user');
+          return;
+        }
+        const file = State.files.get(State.activeFileId);
+        if (!file) {
+          UI.toast('Open a JavaScript file first.', 'warn');
+          return;
+        }
+        let code = file.content == null ? '' : String(file.content);
+        // Read from the live editor model so unsaved keystrokes are executed.
+        if (Editor && Editor.editor) {
+          const model = Editor.editor.getModel();
+          if (model) {
+            code = model.getValue();
+            file.content = code;
+          }
+        }
+        // Make sure the user can see the output.
+        const ws = document.getElementById('workspace');
+        if (ws && ws.classList.contains('console-hidden')) {
+          ws.classList.remove('console-hidden');
+          if (Editor && Editor.editor) {
+            try { Editor.editor.layout(); } catch (_) {}
+          }
+        }
+        if (UI.switchConsoleTab) UI.switchConsoleTab('output');
+        Execution.run(code);
+      } catch (err) {
+        try {
+          State.running = false;
+          if (UI.setRunning) UI.setRunning(false);
+          if (UI.appendConsole) UI.appendConsole('error', 'Failed to run: ' + (err && err.message ? err.message : err));
+          if (UI.toast) UI.toast('Failed to run code', 'error');
+        } catch (_) {
+          console.error('Failed to run code:', err);
+        }
       }
-      const file = State.files.get(State.activeFileId);
-      if (!file) {
-        UI.toast('Open a JavaScript file first.', 'warn');
-        return;
-      }
-      let code = file.content;
-      // If source is 'shortcut'/'palette'/'button', read from active model (handles unsaved content).
-      if (Editor.editor) {
-        const model = Editor.editor.getModel();
-        if (model) code = model.getValue();
-        file.content = code;
-      }
-      Execution.run(code);
     },
 
     stop(reason) {
